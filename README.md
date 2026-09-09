@@ -61,6 +61,12 @@ The debug APK ends up in `app/build/outputs/apk/debug/`. Unit tests (chapter par
 
 Toolchain: AGP 8.13, Kotlin 2.3, compileSdk 36, JDK 17+.
 
+### Test server
+
+`tools/dev-jellyfin.sh` starts a throwaway Jellyfin in Docker with two generated m4b books (chapters and covers included),
+completes the setup wizard and creates a Books library. From the Android emulator sign in with `http://10.0.2.2:8096`,
+user `test`, password `test`.
+
 ## Project layout
 
 ```
