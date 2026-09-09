@@ -110,7 +110,11 @@ class ProgressRepository(
         report(target, playSessionId, target.durationMs, ReportKind.FINISH)
 
     /** Pushes positions recorded while offline, recording a conflict for any book the server moved in the meantime. */
-    suspend fun flushPending() = syncMutex.withLock {
+    suspend fun flushPending() {
+        syncMutex.withLock { flushPendingLocked() }
+    }
+
+    private suspend fun flushPendingLocked() {
         val session = sessionStore.currentSession() ?: return
         if (!connectivity.isOnline()) return
         var reachable = true

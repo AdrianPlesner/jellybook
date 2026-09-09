@@ -2,6 +2,7 @@ package dk.azp.jellybook.data.chapters
 
 import android.net.Uri
 import androidx.media3.common.C
+import androidx.media3.common.PlaybackException
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.DataSpec
@@ -37,7 +38,7 @@ class DataSourceRandomAccessSource(
     } catch (e: HttpDataSource.InvalidResponseCodeException) {
         if (e.responseCode == HTTP_RANGE_NOT_SATISFIABLE) false else throw e
     } catch (e: DataSourceException) {
-        if (e.reason == DataSourceException.POSITION_OUT_OF_RANGE) false else throw e
+        if (e.reason == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE) false else throw e
     }
 
     private fun readFully(dataSource: DataSource, length: Int): ByteArray {

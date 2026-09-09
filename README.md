@@ -64,7 +64,7 @@ network returns the pending entries are compared with the server:
 
 The debug APK ends up in `app/build/outputs/apk/debug/`. Unit tests (chapter parser) run with `./gradlew :app:testDebugUnitTest`.
 
-Toolchain: AGP 8.13, Kotlin 2.3, compileSdk 36, JDK 17+.
+Toolchain: Gradle 9.7, AGP 9.4 (built-in Kotlin), compileSdk 37, JDK 17+.
 
 ### CI and releases
 
