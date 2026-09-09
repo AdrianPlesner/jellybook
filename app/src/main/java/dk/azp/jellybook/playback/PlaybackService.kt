@@ -104,6 +104,7 @@ class PlaybackService : MediaSessionService() {
         val bitmapLoader = DataSourceBitmapLoader(
             MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor()),
             container.upstreamDataSourceFactory,
+            null,
         )
         return MediaSession.Builder(this, player)
             .setId(SESSION_ID)
@@ -139,10 +140,7 @@ class PlaybackService : MediaSessionService() {
                 .remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
                 .remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
                 .build()
-            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
-                .setAvailableSessionCommands(sessionCommands)
-                .setAvailablePlayerCommands(playerCommands)
-                .build()
+            return MediaSession.ConnectionResult.accept(sessionCommands, playerCommands)
         }
 
         override fun onCustomCommand(
@@ -176,6 +174,7 @@ class PlaybackService : MediaSessionService() {
         override fun onPlaybackResumption(
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
+            isForPlayback: Boolean,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future {
             val recent = container.progressRepository.mostRecentlyPlayed() ?: throw UnsupportedOperationException("Nothing to resume")
             val target = PlaybackTarget(
