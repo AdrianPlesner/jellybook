@@ -46,10 +46,15 @@ data class BaseItemDto(
     @SerialName("Id") val id: String,
     @SerialName("Name") val name: String? = null,
     @SerialName("Type") val type: String? = null,
+    @SerialName("IsFolder") val isFolder: Boolean = false,
+    @SerialName("ChildCount") val childCount: Int? = null,
+    @SerialName("CollectionType") val collectionType: String? = null,
     @SerialName("Container") val container: String? = null,
     @SerialName("Overview") val overview: String? = null,
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("ProductionYear") val productionYear: Int? = null,
+    @SerialName("IndexNumber") val indexNumber: Int? = null,
+    @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
     @SerialName("Album") val album: String? = null,
     @SerialName("AlbumArtist") val albumArtist: String? = null,
     @SerialName("Artists") val artists: List<String> = emptyList(),
@@ -65,6 +70,14 @@ data class BaseItemDto(
     val primaryImageTag: String? get() = imageTags["Primary"]
 
     val runTimeMs: Long get() = runTimeTicks?.ticksToMs() ?: 0L
+
+    val isAudioItem: Boolean get() = type == TYPE_AUDIO_BOOK || type == TYPE_AUDIO
+
+    companion object {
+        const val TYPE_AUDIO_BOOK = "AudioBook"
+        const val TYPE_AUDIO = "Audio"
+        const val TYPE_FOLDER = "Folder"
+    }
 }
 
 @Serializable

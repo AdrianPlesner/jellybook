@@ -1,5 +1,6 @@
 #!/bin/sh
-# Starts a throwaway Jellyfin server in Docker with two generated m4b audiobooks (chapters + covers) for manual testing.
+# Starts a throwaway Jellyfin server in Docker with generated audiobooks for manual testing: two single-file m4b books
+# with embedded chapters, and one multi-file book (five mp3s in a folder, one per chapter).
 # Sign in from the emulator with server http://10.0.2.2:8096, user "test", password "test".
 # Usage: tools/dev-jellyfin.sh [workdir]      (defaults to ./build/dev-jellyfin)
 set -e
@@ -11,7 +12,7 @@ BASE=http://localhost:8096
 FF=/usr/lib/jellyfin-ffmpeg/ffmpeg
 AUTH='Authorization: MediaBrowser Client="setup", Device="script", DeviceId="setup-script", Version="1.0"'
 
-mkdir -p "$MEDIA/audiobooks/The Test Book" "$MEDIA/audiobooks/Short Story" "$MEDIA/work" "$CONFIG"
+mkdir -p "$MEDIA/audiobooks/The Test Book" "$MEDIA/audiobooks/Short Story" "$MEDIA/audiobooks/The Long Journey" "$MEDIA/work" "$CONFIG"
 
 cat > "$MEDIA/work/test-book.ffmeta" <<'EOF'
 ;FFMETADATA1
@@ -79,31 +80,60 @@ docker exec $NAME $FF -hide_banner -loglevel error -y \
   -map 0:a -map 2:v -map_metadata 1 -c:a aac -b:a 32k -c:v png -disposition:v attached_pic \
   "/media/audiobooks/Short Story/Short Story.m4b"
 
+# A multi-file book: one mp3 per chapter in a single folder, tagged like a ripped audiobook.
+i=1
+for spec in "Arrival:150" "The Harbour:180" "Night Watch:90" "Departure:210" "Epilogue:60"; do
+  TITLE=${spec%%:*}
+  SECONDS_LONG=${spec##*:}
+  NUM=$(printf '%02d' $i)
+  docker exec $NAME $FF -hide_banner -loglevel error -y \
+    -f lavfi -i "sine=frequency=$((300 + i * 60)):duration=$SECONDS_LONG" \
+    -c:a libmp3lame -b:a 32k \
+    -metadata "title=$NUM - $TITLE" \
+    -metadata "album=The Long Journey" \
+    -metadata "artist=Third Author" \
+    -metadata "album_artist=Third Author" \
+    -metadata "track=$i/5" \
+    "/media/audiobooks/The Long Journey/$NUM - $TITLE.mp3"
+  i=$((i + 1))
+done
+
 echo "waiting for jellyfin"
 i=0
 until curl -sf $BASE/System/Info/Public >/dev/null || [ $i -ge 60 ]; do i=$((i + 1)); sleep 2; done
 
-echo "startup wizard"
-curl -sf -X POST $BASE/Startup/Configuration -H 'Content-Type: application/json' \
-  -d '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}'
-curl -sf $BASE/Startup/User >/dev/null
-curl -sf -X POST $BASE/Startup/User -H 'Content-Type: application/json' -d '{"Name":"test","Password":"test"}'
-curl -sf -X POST $BASE/Startup/RemoteAccess -H 'Content-Type: application/json' -d '{"EnableRemoteAccess":true,"EnableAutomaticPortMapping":false}'
-curl -sf -X POST $BASE/Startup/Complete
+# The config directory survives between runs, so only run the wizard on a fresh one.
+WIZARD_DONE=$(curl -sf $BASE/System/Info/Public | python3 -c 'import json,sys; print(json.load(sys.stdin).get("StartupWizardCompleted"))')
+if [ "$WIZARD_DONE" = "True" ]; then
+  echo "server already set up, reusing it"
+else
+  echo "startup wizard"
+  curl -sf -X POST $BASE/Startup/Configuration -H 'Content-Type: application/json' \
+    -d '{"UICulture":"en-US","MetadataCountryCode":"US","PreferredMetadataLanguage":"en"}'
+  curl -sf $BASE/Startup/User >/dev/null
+  curl -sf -X POST $BASE/Startup/User -H 'Content-Type: application/json' -d '{"Name":"test","Password":"test"}'
+  curl -sf -X POST $BASE/Startup/RemoteAccess -H 'Content-Type: application/json' -d '{"EnableRemoteAccess":true,"EnableAutomaticPortMapping":false}'
+  curl -sf -X POST $BASE/Startup/Complete
+fi
 
 TOKEN=$(curl -sf -X POST $BASE/Users/AuthenticateByName -H "$AUTH" -H 'Content-Type: application/json' \
   -d '{"Username":"test","Pw":"test"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["AccessToken"])')
 TAUTH="Authorization: MediaBrowser Client=\"setup\", Device=\"script\", DeviceId=\"setup-script\", Version=\"1.0\", Token=\"$TOKEN\""
 
-echo "creating library"
-curl -sf -X POST "$BASE/Library/VirtualFolders?name=Audiobooks&collectionType=books&refreshLibrary=true" \
-  -H "$TAUTH" -H 'Content-Type: application/json' \
-  -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/audiobooks"}],"EnableRealtimeMonitor":false}}'
+if curl -sf "$BASE/Library/VirtualFolders" -H "$TAUTH" | grep -q '"Name":"Audiobooks"'; then
+  echo "library exists, rescanning"
+  curl -sf -X POST "$BASE/Library/Refresh" -H "$TAUTH"
+else
+  echo "creating library"
+  curl -sf -X POST "$BASE/Library/VirtualFolders?name=Audiobooks&collectionType=books&refreshLibrary=true" \
+    -H "$TAUTH" -H 'Content-Type: application/json' \
+    -d '{"LibraryOptions":{"PathInfos":[{"Path":"/media/audiobooks"}],"EnableRealtimeMonitor":false}}'
+fi
 
 echo "waiting for scan"
 i=0
 COUNT=0
-while [ "$COUNT" -lt 2 ] && [ $i -lt 60 ]; do
+while [ "$COUNT" -lt 7 ] && [ $i -lt 60 ]; do
   COUNT=$(curl -sf "$BASE/Items?IncludeItemTypes=AudioBook&Recursive=true" -H "$TAUTH" | python3 -c 'import json,sys; print(json.load(sys.stdin)["TotalRecordCount"])' 2>/dev/null || echo 0)
   i=$((i + 1))
   sleep 3

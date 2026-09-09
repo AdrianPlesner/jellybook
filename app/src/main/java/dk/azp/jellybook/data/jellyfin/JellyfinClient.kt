@@ -56,14 +56,21 @@ class JellyfinClient(private val httpClient: OkHttpClient, private val json: Jso
     suspend fun authenticateByName(serverUrl: String, username: String, password: String): AuthenticationResult =
         post(url(serverUrl, "Users/AuthenticateByName"), json.encodeToString(AuthenticateUserByName(username, password)))
 
-    suspend fun audiobooks(serverUrl: String, userId: String): List<BaseItemDto> {
+    /** The user's libraries. A books library is the one that holds audiobooks. */
+    suspend fun userViews(serverUrl: String, userId: String): List<BaseItemDto> =
+        get<BaseItemDtoQueryResult>(url(serverUrl, "UserViews") { addQueryParameter("userId", userId) }).items
+
+    /**
+     * Direct children of a folder. Walking the library one level at a time is what tells a folder that *is* a book (its
+     * children are audio files) apart from a folder that merely *contains* books.
+     */
+    suspend fun children(serverUrl: String, userId: String, parentId: String): List<BaseItemDto> {
         val url = url(serverUrl, "Items") {
             addQueryParameter("userId", userId)
-            addQueryParameter("includeItemTypes", "AudioBook")
-            addQueryParameter("recursive", "true")
+            addQueryParameter("parentId", parentId)
             addQueryParameter("sortBy", "SortName")
             addQueryParameter("sortOrder", "Ascending")
-            addQueryParameter("fields", "Overview,MediaSources,ProductionYear")
+            addQueryParameter("fields", "Overview,ProductionYear,ChildCount,Chapters")
             addQueryParameter("enableImageTypes", "Primary")
             addQueryParameter("imageTypeLimit", "1")
         }
@@ -71,7 +78,12 @@ class JellyfinClient(private val httpClient: OkHttpClient, private val json: Jso
     }
 
     suspend fun item(serverUrl: String, userId: String, itemId: String): BaseItemDto =
-        get(url(serverUrl, "Items/$itemId") { addQueryParameter("userId", userId) })
+        get(
+            url(serverUrl, "Items/$itemId") {
+                addQueryParameter("userId", userId)
+                addQueryParameter("fields", "Overview,MediaSources,ProductionYear,ChildCount,Chapters")
+            },
+        )
 
     suspend fun reportPlaybackStart(serverUrl: String, info: PlaybackStartInfo) {
         postNoContent(url(serverUrl, "Sessions/Playing"), json.encodeToString(info))

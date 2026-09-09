@@ -12,6 +12,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.offline.DownloadManager
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
+import dk.azp.jellybook.data.BookRepository
 import dk.azp.jellybook.data.Connectivity
 import dk.azp.jellybook.data.bookmarks.BookmarkRepository
 import dk.azp.jellybook.data.chapters.ChapterRepository
@@ -79,7 +80,8 @@ class AppContainer(context: Context) {
 
     val mediaItemFactory = MediaItemFactory(client, sessionStore)
     val chapterRepository = ChapterRepository(playbackDataSourceFactory, offlineCatalog)
-    val progressRepository = ProgressRepository(client, sessionStore, progressStore, connectivity)
+    val bookRepository = BookRepository(client, sessionStore)
+    val progressRepository = ProgressRepository(client, bookRepository, sessionStore, progressStore, connectivity)
     val bookmarkRepository = BookmarkRepository(client, sessionStore, bookmarkStore, connectivity)
     val downloadRepository = DownloadRepository(context, downloadManager, offlineCatalog, client, sessionStore, httpClient, appScope)
     val playback = PlaybackConnection(context)

@@ -8,8 +8,6 @@ import dk.azp.jellybook.data.chapters.Chapter
 import dk.azp.jellybook.data.downloads.DownloadInfo
 import dk.azp.jellybook.data.local.Bookmark
 import dk.azp.jellybook.data.model.Book
-import dk.azp.jellybook.data.model.toBook
-import dk.azp.jellybook.data.model.toPlaybackTarget
 import dk.azp.jellybook.data.progress.ProgressRepository
 import dk.azp.jellybook.playback.PlayerUiState
 import dk.azp.jellybook.playback.SleepTimerState
@@ -37,44 +35,49 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
     )
 
     private val stateFlow = MutableStateFlow(State())
-    private var mediaItem: MediaItem? = null
+    private var mediaItems: List<MediaItem> = emptyList()
 
     val state: StateFlow<State> = stateFlow
 
     val player: StateFlow<PlayerUiState> = container.playback.state
 
-    private val isCurrent: Boolean get() = player.value.mediaId == bookId
+    private val isCurrent: Boolean get() = player.value.bookId == bookId
 
     init {
         load()
         viewModelScope.launch { container.bookmarkRepository.bookmarks(bookId).collect { list -> stateFlow.update { it.copy(bookmarks = list) } } }
         viewModelScope.launch { container.downloadRepository.downloads.collect { map -> stateFlow.update { it.copy(download = map[bookId]) } } }
         viewModelScope.launch {
-            container.progressRepository.checkpointApplied.filter { it.itemId == bookId }.collect { applied ->
+            container.progressRepository.checkpointApplied.filter { it.bookId == bookId }.collect { applied ->
                 stateFlow.update { it.copy(resumePositionMs = applied.positionMs, awaitingConflict = false) }
             }
         }
         viewModelScope.launch {
-            player.filter { it.mediaId == bookId }.collect { playing ->
-                if (playing.positionMs > 0) stateFlow.update { it.copy(resumePositionMs = playing.positionMs) }
+            player.filter { it.bookId == bookId }.collect { playing ->
+                if (playing.bookPositionMs > 0) stateFlow.update { it.copy(resumePositionMs = playing.bookPositionMs) }
             }
         }
     }
 
-    fun currentPositionMs(): Long = if (isCurrent) player.value.positionMs else stateFlow.value.resumePositionMs
+    /** Position on the book timeline, whether or not this book is the one loaded in the player. */
+    fun currentPositionMs(): Long = if (isCurrent) player.value.bookPositionMs else stateFlow.value.resumePositionMs
 
     fun togglePlay() {
         if (isCurrent) container.playback.togglePlayPause() else startPlayback(startPosition())
     }
 
     fun seekTo(positionMs: Long) {
-        val clamped = positionMs.coerceIn(0L, maxOf(0L, stateFlow.value.book?.durationMs ?: Long.MAX_VALUE))
-        if (isCurrent) container.playback.seekTo(clamped) else startPlayback(clamped)
+        val book = stateFlow.value.book ?: return
+        val clamped = positionMs.coerceIn(0L, book.durationMs)
+        if (isCurrent) {
+            val split = book.toPartPosition(clamped)
+            container.playback.seekToPart(split.partIndex, split.offsetMs)
+        } else {
+            startPlayback(clamped)
+        }
     }
 
-    fun skip(deltaMs: Long) {
-        if (isCurrent) container.playback.seekBy(deltaMs) else seekTo(currentPositionMs() + deltaMs)
-    }
+    fun skip(deltaMs: Long) = seekTo(currentPositionMs() + deltaMs)
 
     fun previousChapter() {
         val position = currentPositionMs()
@@ -129,7 +132,8 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         val book = stateFlow.value.book ?: return
         viewModelScope.launch {
             container.downloadRepository.startDownload(book, stateFlow.value.chapters)
-            stateFlow.update { it.copy(message = "Download started") }
+            val parts = if (book.isMultiPart) " (${book.parts.size} files)" else ""
+            stateFlow.update { it.copy(message = "Download started$parts") }
         }
     }
 
@@ -145,7 +149,7 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
             var offlineCopy = false
             val book = try {
                 if (session == null) throw IOException("Not signed in")
-                container.client.item(session.serverUrl, session.userId, bookId).toBook()
+                container.bookRepository.book(bookId)
             } catch (e: IOException) {
                 offlineCopy = true
                 container.downloadRepository.downloadedBook(bookId)
@@ -155,8 +159,9 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
                 return@launch
             }
             val coverFile = container.downloadRepository.coverFile(bookId)
-            val cover: Any? = coverFile ?: book.imageTag?.let { tag -> session?.let { container.client.primaryImageUrl(it.serverUrl, bookId, tag, COVER_HEIGHT_PX) } }
-            mediaItem = container.mediaItemFactory.create(book.toPlaybackTarget(coverFile?.absolutePath))
+            val cover: Any? = coverFile
+                ?: book.imageTag?.let { tag -> session?.let { container.client.primaryImageUrl(it.serverUrl, book.imageItemId, tag, COVER_HEIGHT_PX) } }
+            mediaItems = container.mediaItemFactory.create(book, coverFile?.absolutePath)
             val start = container.progressRepository.resolveStartPosition(book)
             stateFlow.update {
                 it.copy(
@@ -171,11 +176,16 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
                     awaitingConflict = start is ProgressRepository.StartPosition.Conflict,
                 )
             }
-            val mediaUri = container.mediaItemFactory.mediaUri(bookId)
-            val chapters = if (mediaUri != null) container.chapterRepository.chaptersFor(book, mediaUri) else book.serverChapters
-            stateFlow.update { it.copy(chapters = chapters) }
+            stateFlow.update { it.copy(chapters = chaptersFor(book)) }
             launch { container.bookmarkRepository.sync(bookId) }
         }
+    }
+
+    /** A multi-file book gets its chapters from the files themselves; a single file may need its markers parsed. */
+    private suspend fun chaptersFor(book: Book): List<Chapter> {
+        val firstPart = book.parts.firstOrNull() ?: return emptyList()
+        val mediaUri = container.mediaItemFactory.mediaUri(firstPart.itemId) ?: return book.serverChapters
+        return container.chapterRepository.chaptersFor(book, mediaUri)
     }
 
     private fun startPosition(): Long {
@@ -185,15 +195,18 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
     }
 
     private fun startPlayback(positionMs: Long) {
-        if (stateFlow.value.awaitingConflict) {
+        val current = stateFlow.value
+        if (current.awaitingConflict) {
             stateFlow.update { it.copy(message = "Choose which progress checkpoint to keep first") }
             return
         }
-        val item = mediaItem ?: run {
+        val book = current.book ?: return
+        if (mediaItems.isEmpty()) {
             stateFlow.update { it.copy(message = "Sign in again to play this book") }
             return
         }
-        viewModelScope.launch { container.playback.play(item, positionMs) }
+        val split = book.toPartPosition(positionMs)
+        viewModelScope.launch { container.playback.play(mediaItems, split.partIndex, split.offsetMs) }
     }
 
     private companion object {

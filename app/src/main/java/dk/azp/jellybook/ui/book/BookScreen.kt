@@ -85,9 +85,9 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
     val viewModel: BookViewModel = viewModel(key = "book:$bookId") { BookViewModel(container, bookId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
-    val isCurrent = player.mediaId == bookId
-    val positionMs = if (isCurrent) player.positionMs else state.resumePositionMs
-    val durationMs = state.book?.durationMs?.takeIf { it > 0 } ?: player.durationMs
+    val isCurrent = player.bookId == bookId
+    val positionMs = if (isCurrent) player.bookPositionMs else state.resumePositionMs
+    val durationMs = state.book?.durationMs?.takeIf { it > 0 } ?: player.bookDurationMs
     val currentChapter = state.chapters.lastOrNull { it.startMs <= positionMs }
 
     var showSleepDialog by remember { mutableStateOf(false) }

@@ -1,13 +1,17 @@
 package dk.azp.jellybook.playback
 
 import androidx.media3.common.Player
+import dk.azp.jellybook.data.model.PlaybackTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** Pauses playback after a wall-clock delay or once the position reaches a chapter boundary. Runs inside the service. */
+/**
+ * Pauses playback after a wall-clock delay or once the book position reaches a chapter boundary. Chapter positions are
+ * book-relative, which for a multi-file book means they can fall in a later part than the one playing now.
+ */
 class SleepTimer(
     private val player: Player,
     private val scope: CoroutineScope,
@@ -30,7 +34,7 @@ class SleepTimer(
                 val delayMs = ((newState.endsAtEpochMs ?: 0L) - System.currentTimeMillis()).coerceAtLeast(0L)
                 job = scope.launch {
                     delay(delayMs)
-                    finish(seekTo = null)
+                    finish()
                 }
             }
             SleepTimerMode.CHAPTER_END -> {
@@ -38,10 +42,11 @@ class SleepTimer(
                 job = scope.launch {
                     var reached = false
                     while (isActive && !reached) {
-                        reached = player.isPlaying && player.currentPosition >= stopAt
+                        val position = bookPosition()
+                        reached = player.isPlaying && position != null && position >= stopAt
                         if (!reached) delay(POLL_INTERVAL_MS)
                     }
-                    if (reached) finish(seekTo = stopAt)
+                    if (reached) finish()
                 }
             }
         }
@@ -52,9 +57,13 @@ class SleepTimer(
         job = null
     }
 
-    private fun finish(seekTo: Long?) {
+    private fun bookPosition(): Long? {
+        val target = player.currentMediaItem?.let { PlaybackTarget.fromMediaItem(it) } ?: return null
+        return target.bookPositionMs(player.currentPosition)
+    }
+
+    private fun finish() {
         player.pause()
-        if (seekTo != null) player.seekTo(seekTo)
         job = null
         state = SleepTimerState.OFF
         onStateChanged(state)

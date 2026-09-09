@@ -5,6 +5,18 @@ import dk.azp.jellybook.data.chapters.Chapter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
 
+/** One downloaded audio file of a book, with its place on the book timeline. */
+@Serializable
+data class DownloadedPart(
+    val itemId: String,
+    val title: String,
+    val index: Int,
+    val startOffsetMs: Long,
+    val durationMs: Long,
+    val mediaSourceId: String? = null,
+    val container: String? = null,
+)
+
 /** Everything the app needs to show and play a book while the server is unreachable. */
 @Serializable
 data class DownloadedBook(
@@ -12,11 +24,10 @@ data class DownloadedBook(
     val title: String,
     val author: String? = null,
     val overview: String? = null,
-    val durationMs: Long,
     val imageTag: String? = null,
-    val mediaSourceId: String? = null,
-    val container: String? = null,
+    val imageItemId: String? = null,
     val productionYear: Int? = null,
+    val partList: List<DownloadedPart> = emptyList(),
     val chapters: List<Chapter> = emptyList(),
     val coverPath: String? = null,
     val downloadedAtEpochMs: Long,

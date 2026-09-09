@@ -6,8 +6,9 @@ import kotlinx.coroutines.flow.map
 import kotlinx.serialization.Serializable
 
 /**
- * The listening position known on this device. `serverPositionMs` is the server position as of the last successful sync and
- * is what lets us tell "the server moved because another device listened" apart from "the server still has what we wrote".
+ * The listening position known on this device, on the book's own timeline and keyed by book id, so a multi-file book has one
+ * entry rather than one per file. `serverPositionMs` is the server position as of the last successful sync and is what lets
+ * us tell "the server moved because another device listened" apart from "the server still has what we wrote".
  */
 @Serializable
 data class LocalProgress(
@@ -15,7 +16,7 @@ data class LocalProgress(
     val title: String,
     val author: String? = null,
     val imageTag: String? = null,
-    val mediaSourceId: String? = null,
+    val imageItemId: String? = null,
     val positionMs: Long,
     val durationMs: Long,
     val updatedAtEpochMs: Long,

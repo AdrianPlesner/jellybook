@@ -62,7 +62,6 @@ import dk.azp.jellybook.data.jellyfin.JellyfinException
 import dk.azp.jellybook.data.local.LocalProgress
 import dk.azp.jellybook.data.local.ServerSession
 import dk.azp.jellybook.data.model.Book
-import dk.azp.jellybook.data.model.toBook
 import dk.azp.jellybook.ui.formatDurationShort
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -126,10 +125,8 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             loading.value = true
             error.value = null
-            val session = container.sessionStore.currentSession()
             try {
-                if (session == null) throw IOException("Not signed in")
-                books.value = container.client.audiobooks(session.serverUrl, session.userId).map { it.toBook() }
+                books.value = container.bookRepository.library()
                 offline.value = false
             } catch (e: JellyfinException) {
                 if (e.statusCode == 401) container.sessionStore.clearSession() else showOfflineBooks("Server error: ${e.message}")
@@ -160,7 +157,7 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     }
 
     private fun toItem(book: Book, local: LocalProgress?, download: DownloadInfo?): Item {
-        val remote = book.remoteProgress
+        val remote = book.remoteProgress()
         val position = local?.positionMs ?: remote?.effectivePositionMs(book.durationMs) ?: 0L
         val finishedRemotely = remote != null && remote.played && remote.positionMs == 0L
         val nearEnd = book.durationMs > 0 && position >= book.durationMs - END_TOLERANCE_MS
