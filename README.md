@@ -74,16 +74,28 @@ Toolchain: Gradle 9.7, AGP 9.4 (built-in Kotlin), compileSdk 37, JDK 17+.
   *Run workflow* with an existing tag). It runs the tests, builds a minified release APK with `versionName` taken from the
   tag and `versionCode` from the run number, and attaches `jellybook-<tag>.apk` to the release.
 
-Release signing uses these repository secrets when present: `RELEASE_KEYSTORE_BASE64` (the keystore file, base64
-encoded), `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`. Without them the APK is signed with
-the runner's debug key and named `jellybook-<tag>-debugsigned.apk`; it installs fine, but a later release signed with a
-different key cannot be installed over it. Create a keystore once with:
+#### Signing
+
+Releases are signed with a stable key, so each release installs as an update over the previous one. Verify a downloaded
+APK with `apksigner verify --print-certs jellybook-<tag>.apk`; the certificate is
+
+```
+CN=Adrian Plesner, O=Jellybook, C=DK
+SHA-256: 50:1B:7E:71:95:AC:77:67:F7:B8:65:D4:B8:98:9B:55:F2:5C:47:BE:9B:51:56:3B:11:9A:30:13:53:21:B4:BB
+```
+
+Signing reads four repository secrets: `RELEASE_KEYSTORE_BASE64` (the keystore, base64 encoded),
+`RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS` and `RELEASE_KEY_PASSWORD`. If they are absent, as in a fork, the build
+falls back to the runner's debug key and names the file `jellybook-<tag>-debugsigned.apk`. Such a build installs and runs,
+but every run generates a different debug key, so those APKs cannot be updated in place. To set up your own key:
 
 ```bash
 keytool -genkeypair -v -keystore jellybook.keystore -alias jellybook -keyalg RSA -keysize 4096 -validity 10000
+openssl base64 -A -in jellybook.keystore | gh secret set RELEASE_KEYSTORE_BASE64
 ```
 
-and store it with `base64 -i jellybook.keystore | gh secret set RELEASE_KEYSTORE_BASE64`.
+Keep the keystore and its password backed up outside the repository. Losing them means future releases are signed with a
+different key and can no longer update an installed copy of the app.
 
 ### Test server
 
