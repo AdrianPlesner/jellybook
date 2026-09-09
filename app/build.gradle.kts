@@ -20,7 +20,7 @@ android {
     }
 
     // CI signs releases with a keystore provided through environment variables; local release builds fall back to the debug key.
-    val releaseKeystorePath = System.getenv("RELEASE_KEYSTORE_PATH")
+    val releaseKeystorePath = System.getenv("RELEASE_KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
     if (releaseKeystorePath != null) {
         signingConfigs {
             create("release") {
