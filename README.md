@@ -15,6 +15,10 @@ Download the latest APK from the [releases page](https://github.com/AdrianPlesne
   app reads the chapter markers straight from the file with HTTP range requests: both QuickTime chapter tracks (`tref/chap`)
   and Nero `chpl` atoms are supported, so no full download is needed. Chapter-relative scrubbing, previous/next chapter and
   a highlighted chapter list.
+- **Multi-file books.** A folder holding one audio file per chapter is presented as a single book: the files are laid end to
+  end on one timeline, each file becomes a chapter, and scrubbing, skipping, bookmarks, the sleep timer and downloads all
+  work in book time rather than file time. Playback runs on across file boundaries without a pause. A file that carries its
+  own chapter markers contributes those instead of one chapter for the whole file.
 - **Progress is stored on the Jellyfin server**, so it follows you across devices and shows up in Jellyfin's own UI. No plugin
   is required, see below.
 - **Offline listening.** Download a book to the device (Media3 download cache, resumable, with a progress notification) and
@@ -37,6 +41,18 @@ last five minutes. To keep the exact position anyway the app additionally writes
 
 Bookmarks live in `GET/POST /DisplayPreferences/jellybook?client=jellybook` under `CustomPrefs["bookmarks.<itemId>"]`, the
 same per-user key/value store the web client uses for its settings.
+
+### Multi-file books
+
+Jellyfin has no concept of a multi-file audiobook: a folder of mp3s becomes one `AudioBook` item per file, and there is
+nowhere to store a position for the book as a whole. So the app keeps its own book-level position on the device, and on the
+server it writes the position to the file that holds it while marking the files before it played. Reading it back is the
+reverse: the book position is the most recently played unfinished file plus its offset, or the start of the first unplayed
+file. Jellyfin's own UI then shows a sensible played count for the folder, and other clients resume in the right file.
+
+Grouping walks the library top down, because grouping a flat item listing by parent id would be wrong: Jellyfin parents a
+single-file book directly to the library root, which would merge every such book into one. A folder whose direct children
+are audio files is one book; a folder of folders is a level of organisation to descend into, up to three levels deep.
 
 ### Sync rules
 
@@ -109,6 +125,7 @@ user `test`, password `test`.
 app/src/main/java/dk/azp/jellybook/
   AppContainer.kt              hand-wired dependencies
   data/jellyfin/               thin OkHttp + kotlinx.serialization client for the Jellyfin REST API
+  data/BookRepository.kt       walks the Jellyfin item tree into books, single-file and multi-file
   data/chapters/               MP4 chapter parser (chpl + chapter tracks) and the chapter repository
   data/progress/               progress sync: live reporting, offline queue, conflict detection
   data/bookmarks/              bookmark merge/sync through display preferences
@@ -120,6 +137,7 @@ app/src/main/java/dk/azp/jellybook/
 
 ## Known limitations
 
-- Multi-file audiobooks (a folder of mp3s) appear as one entry per file; single-file m4b books are the primary target.
+- The library is assembled client side, so very large libraries are fetched in full rather than paged.
+- Files are ordered by disc and track tags, falling back to name; a folder with neither tagged nor sortable names may order wrongly.
 - Bookmarks are merged by id; renaming the same bookmark on two devices while offline keeps the local name.
 - No Android Auto browse tree yet (the media session itself works with Auto/Wear controls).

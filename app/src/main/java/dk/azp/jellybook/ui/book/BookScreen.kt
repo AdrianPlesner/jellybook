@@ -276,7 +276,12 @@ private fun BookHeader(book: Book, state: BookViewModel.State) {
                 Text(book.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                 book.author?.let { Text(it, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Spacer(Modifier.height(4.dp))
-                val details = listOfNotNull(book.productionYear?.toString(), formatDurationShort(book.durationMs), book.container?.uppercase())
+                val details = listOfNotNull(
+                    book.productionYear?.toString(),
+                    formatDurationShort(book.durationMs),
+                    book.container?.uppercase(),
+                    if (book.isMultiPart) "${book.parts.size} files" else null,
+                )
                 Text(details.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
