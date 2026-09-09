@@ -80,8 +80,8 @@ Releases are signed with a stable key, so each release installs as an update ove
 APK with `apksigner verify --print-certs jellybook-<tag>.apk`; the certificate is
 
 ```
-CN=Adrian Plesner, O=Jellybook, C=DK
-SHA-256: 50:1B:7E:71:95:AC:77:67:F7:B8:65:D4:B8:98:9B:55:F2:5C:47:BE:9B:51:56:3B:11:9A:30:13:53:21:B4:BB
+CN=Jellybook
+SHA-256: 9E:82:EB:D3:BE:50:E1:E8:93:1F:31:61:CA:F1:AF:22:AF:C7:D0:7D:5C:62:DA:E3:E6:9E:58:63:D2:34:17:41
 ```
 
 Signing reads four repository secrets: `RELEASE_KEYSTORE_BASE64` (the keystore, base64 encoded),
