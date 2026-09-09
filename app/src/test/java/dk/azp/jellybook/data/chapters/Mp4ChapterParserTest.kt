@@ -1,0 +1,181 @@
+package dk.azp.jellybook.data.chapters
+
+import java.nio.ByteBuffer
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class Mp4ChapterParserTest {
+
+    @Test
+    fun readsNeroChaptersFromUdta() = runTest {
+        val file = ftyp() + moov(mvhd(timescale = 1000, duration = 600_000), udta(chpl(listOf(0L to "Intro", 120_000L to "Part One", 400_000L to "Part Two")))) + mdat(ByteArray(64))
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertNotNull(result)
+        assertEquals(600_000L, result!!.durationMs)
+        assertEquals(listOf("Intro", "Part One", "Part Two"), result.chapters.map { it.title })
+        assertEquals(listOf(0L, 120_000L, 400_000L), result.chapters.map { it.startMs })
+        assertEquals(listOf(120_000L, 400_000L, 600_000L), result.chapters.map { it.endMs })
+    }
+
+    @Test
+    fun readsQuickTimeChapterTrackWithMoovAfterMdat() = runTest {
+        val titles = listOf("Chapter 1", "Chapter 2", "Chapter 3")
+        val samples = titles.map { textSample(it) }
+        val mdatHeader = 8
+        val sampleData = samples.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+        val ftyp = ftyp()
+        val firstSampleOffset = (ftyp.size + mdatHeader + 100).toLong()
+        val mdatPayload = ByteArray(100) + sampleData
+        val chapterTrack = trak(
+            tkhd(trackId = 2),
+            mdia(
+                mdhd(timescale = 600),
+                hdlr("text"),
+                minf(stbl(
+                    stsd("text"),
+                    stts(listOf(1 to 90_000, 1 to 60_000, 1 to 30_000)),
+                    stsc(listOf(Triple(1, 3, 1))),
+                    stsz(samples.map { it.size }),
+                    stco(listOf(firstSampleOffset)),
+                )),
+            ),
+        )
+        val audioTrack = trak(tkhd(trackId = 1), tref(chap(listOf(2))), mdia(mdhd(timescale = 44_100), hdlr("soun"), minf(stbl())))
+        val file = ftyp + mdat(mdatPayload) + moov(mvhd(timescale = 600, duration = 180_000), audioTrack, chapterTrack)
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertNotNull(result)
+        assertEquals(300_000L, result!!.durationMs)
+        assertEquals(titles, result.chapters.map { it.title })
+        assertEquals(listOf(0L, 150_000L, 250_000L), result.chapters.map { it.startMs })
+        assertEquals(listOf(150_000L, 250_000L, 300_000L), result.chapters.map { it.endMs })
+    }
+
+    @Test
+    fun prefersChapterTrackWhenNeroListIsAtItsLimit() = runTest {
+        val neroChapters = (0 until 255).map { (it * 1000L) to "Nero $it" }
+        val titles = (0 until 300).map { "Track $it" }
+        val samples = titles.map { textSample(it) }
+        val ftyp = ftyp()
+        val sampleData = samples.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+        val chapterTrack = trak(
+            tkhd(trackId = 2),
+            mdia(
+                mdhd(timescale = 1000),
+                hdlr("text"),
+                minf(stbl(
+                    stsd("text"),
+                    stts(listOf(300 to 1000)),
+                    stsc(listOf(Triple(1, 300, 1))),
+                    stsz(samples.map { it.size }),
+                    stco(listOf((ftyp.size + 8).toLong())),
+                )),
+            ),
+        )
+        val audioTrack = trak(tkhd(trackId = 1), tref(chap(listOf(2))), mdia(mdhd(timescale = 44_100), hdlr("soun"), minf(stbl())))
+        val file = ftyp + mdat(sampleData) + moov(mvhd(1000, 400_000), udta(chpl(neroChapters)), audioTrack, chapterTrack)
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertEquals(300, result!!.chapters.size)
+        assertEquals("Track 299", result.chapters.last().title)
+    }
+
+    @Test
+    fun returnsEmptyChapterListWhenFileHasNone() = runTest {
+        val file = ftyp() + moov(mvhd(timescale = 1000, duration = 5_000)) + mdat(ByteArray(10))
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertNotNull(result)
+        assertTrue(result!!.chapters.isEmpty())
+        assertEquals(5_000L, result.durationMs)
+    }
+
+    @Test
+    fun rejectsNonMp4Input() = runTest {
+        val mp3Header = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0, 0) + ByteArray(64)
+
+        assertNull(Mp4ChapterParser(ByteArraySource(mp3Header)).parse())
+    }
+
+    private class ByteArraySource(private val bytes: ByteArray) : RandomAccessSource {
+        override suspend fun read(offset: Long, length: Int): ByteArray {
+            if (offset >= bytes.size) return ByteArray(0)
+            val end = minOf(bytes.size.toLong(), offset + length).toInt()
+            return bytes.copyOfRange(offset.toInt(), end)
+        }
+    }
+
+    private fun box(type: String, vararg payloads: ByteArray): ByteArray {
+        val payload = payloads.fold(ByteArray(0)) { acc, bytes -> acc + bytes }
+        return u32(8 + payload.size) + type.toByteArray(Charsets.ISO_8859_1) + payload
+    }
+
+    private fun fullBox(type: String, version: Int, vararg payloads: ByteArray): ByteArray =
+        box(type, byteArrayOf(version.toByte(), 0, 0, 0), *payloads)
+
+    private fun ftyp() = box("ftyp", "M4A ".toByteArray(), u32(0), "M4A mp42isom".toByteArray())
+
+    private fun mdat(payload: ByteArray) = box("mdat", payload)
+
+    private fun moov(vararg children: ByteArray) = box("moov", *children)
+
+    private fun mvhd(timescale: Int, duration: Long) = fullBox("mvhd", 0, u32(0), u32(0), u32(timescale), u32(duration.toInt()), ByteArray(80))
+
+    private fun udta(vararg children: ByteArray) = box("udta", *children)
+
+    private fun chpl(chapters: List<Pair<Long, String>>): ByteArray {
+        val entries = chapters.fold(ByteArray(0)) { acc, (startMs, title) ->
+            val titleBytes = title.toByteArray(Charsets.UTF_8)
+            acc + u64(startMs * 10_000) + byteArrayOf(titleBytes.size.toByte()) + titleBytes
+        }
+        return fullBox("chpl", 1, u32(0), byteArrayOf(chapters.size.toByte()), entries)
+    }
+
+    private fun trak(vararg children: ByteArray) = box("trak", *children)
+
+    private fun tkhd(trackId: Int) = fullBox("tkhd", 0, u32(0), u32(0), u32(trackId), u32(0), u32(0), ByteArray(60))
+
+    private fun tref(vararg children: ByteArray) = box("tref", *children)
+
+    private fun chap(trackIds: List<Int>) = box("chap", *trackIds.map { u32(it) }.toTypedArray())
+
+    private fun mdia(vararg children: ByteArray) = box("mdia", *children)
+
+    private fun mdhd(timescale: Int) = fullBox("mdhd", 0, u32(0), u32(0), u32(timescale), u32(0), u32(0))
+
+    private fun hdlr(handler: String) = fullBox("hdlr", 0, u32(0), handler.toByteArray(Charsets.ISO_8859_1), ByteArray(13))
+
+    private fun minf(vararg children: ByteArray) = box("minf", *children)
+
+    private fun stbl(vararg children: ByteArray) = box("stbl", *children)
+
+    private fun stsd(format: String) = fullBox("stsd", 0, u32(1), box(format, ByteArray(8)))
+
+    private fun stts(entries: List<Pair<Int, Int>>) =
+        fullBox("stts", 0, u32(entries.size), *entries.map { (count, delta) -> u32(count) + u32(delta) }.toTypedArray())
+
+    private fun stsc(entries: List<Triple<Int, Int, Int>>) =
+        fullBox("stsc", 0, u32(entries.size), *entries.map { (first, perChunk, index) -> u32(first) + u32(perChunk) + u32(index) }.toTypedArray())
+
+    private fun stsz(sizes: List<Int>) = fullBox("stsz", 0, u32(0), u32(sizes.size), *sizes.map { u32(it) }.toTypedArray())
+
+    private fun stco(offsets: List<Long>) = fullBox("stco", 0, u32(offsets.size), *offsets.map { u32(it.toInt()) }.toTypedArray())
+
+    private fun textSample(text: String): ByteArray {
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        return byteArrayOf((bytes.size shr 8).toByte(), bytes.size.toByte()) + bytes
+    }
+
+    private fun u32(value: Int): ByteArray = ByteBuffer.allocate(4).putInt(value).array()
+
+    private fun u64(value: Long): ByteArray = ByteBuffer.allocate(8).putLong(value).array()
+}
