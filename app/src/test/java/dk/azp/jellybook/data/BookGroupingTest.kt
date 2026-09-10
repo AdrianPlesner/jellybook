@@ -48,17 +48,17 @@ class BookGroupingTest {
     @Test
     fun aBookSplitIntoNumberedPartsThatKeepTheirOwnChaptersIsOneBook() {
         val folder = (1..3).map { index ->
-            file("Part $index", album = "The Long Winter", index = index, chapters = 6, durationMs = hours(4))
+            file("Part $index", album = "The Long Crossing", index = index, chapters = 6, durationMs = hours(4))
         }
 
         assertTrue(BookGrouping.looksLikeOneBook(folder))
     }
 
     @Test
-    fun booksSharingAnAlbumTagAreStillSeparatedWhenEachHasItsOwnChapters() {
+    fun booksSharingASeriesAlbumTagAreStillSeparatedWhenEachHasItsOwnChapters() {
         val folder = listOf(
-            file("Guards! Guards!", album = "Discworld", chapters = 20, durationMs = hours(10)),
-            file("Men at Arms", album = "Discworld", chapters = 18, durationMs = hours(11)),
+            file("Tower of Glass", album = "The Ashen Cycle", chapters = 20, durationMs = hours(10)),
+            file("Salt and Cinder", album = "The Ashen Cycle", chapters = 18, durationMs = hours(11)),
         )
 
         assertFalse(BookGrouping.looksLikeOneBook(folder))

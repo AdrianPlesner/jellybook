@@ -107,6 +107,15 @@ fun UserItemDataDto.toRemoteProgress(): RemoteProgress = RemoteProgress(
     lastPlayedEpochMs = lastPlayedDate?.let { raw -> runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull() },
 )
 
+/**
+ * Positional labels for parts whose own titles say nothing. A rip that tags every file with the book's name gives every
+ * part the same title, which is useless as a chapter list.
+ */
+private fun List<BookPart>.withUsefulTitles(): List<BookPart> {
+    val distinct = map { it.title.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()
+    return if (distinct.size > 1) this else mapIndexed { index, part -> part.copy(title = "Part ${index + 1}") }
+}
+
 /** Lays audio items end to end, taking each part's title from the file and its length from the server. */
 fun List<BaseItemDto>.toParts(): List<BookPart> {
     var offset = 0L
@@ -123,7 +132,7 @@ fun List<BaseItemDto>.toParts(): List<BookPart> {
             imageTag = item.primaryImageTag,
             remoteProgress = item.userData?.toRemoteProgress(),
         ).also { offset += duration }
-    }
+    }.withUsefulTitles()
 }
 
 /** Chapter markers of the parts, shifted onto the book timeline. A part without markers contributes itself. */

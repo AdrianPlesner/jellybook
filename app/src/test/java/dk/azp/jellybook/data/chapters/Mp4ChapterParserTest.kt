@@ -100,10 +100,41 @@ class Mp4ChapterParserTest {
     }
 
     @Test
+    fun readsOnlyTheChapterDataFromAFileWithAHugeMoov() = runTest {
+        // A real audiobook's moov runs to megabytes, nearly all of it the audio track's sample tables.
+        val padding = ByteArray(6 * 1024 * 1024)
+        val audioTrack = trak(
+            tkhd(trackId = 1),
+            mdia(mdhd(timescale = 44_100), hdlr("soun"), minf(stbl(stsd("mp4a"), box("stsz", padding)))),
+        )
+        val file = ftyp() +
+            moov(mvhd(timescale = 1000, duration = 600_000), audioTrack, udta(chpl(listOf(0L to "One", 300_000L to "Two")))) +
+            mdat(ByteArray(64))
+        val source = CountingSource(file)
+
+        val result = Mp4ChapterParser(source).parse()
+
+        assertEquals(listOf("One", "Two"), result!!.chapters.map { it.title })
+        assertTrue("read ${source.bytesRead} bytes from a ${file.size} byte file", source.bytesRead < 64 * 1024)
+    }
+
+    @Test
     fun rejectsNonMp4Input() = runTest {
         val mp3Header = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0, 0) + ByteArray(64)
 
         assertNull(Mp4ChapterParser(ByteArraySource(mp3Header)).parse())
+    }
+
+    /** Records how much of the file the parser actually pulls. */
+    private class CountingSource(private val bytes: ByteArray) : RandomAccessSource {
+        var bytesRead = 0L
+            private set
+
+        override suspend fun read(offset: Long, length: Int): ByteArray {
+            if (offset >= bytes.size) return ByteArray(0)
+            val end = minOf(bytes.size.toLong(), offset + length).toInt()
+            return bytes.copyOfRange(offset.toInt(), end).also { bytesRead += it.size }
+        }
     }
 
     private class ByteArraySource(private val bytes: ByteArray) : RandomAccessSource {
