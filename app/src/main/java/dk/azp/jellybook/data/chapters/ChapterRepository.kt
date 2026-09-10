@@ -31,7 +31,8 @@ class ChapterRepository(
     private suspend fun parseFromFile(book: Book, mediaUri: Uri): ChapterResult {
         val container = book.container?.lowercase()
         if (container != null && container !in MP4_CONTAINERS) {
-            val note = "A $container file cannot carry chapter markers; only m4b and mp4 can."
+            // mp3 can carry chapters in ID3 frames, which this app does not read yet; say so rather than claiming it cannot.
+            val note = "Chapter markers in $container files are not read yet; m4b and mp4 are."
             Log.d(TAG, "No chapters for ${book.title}: $note")
             return ChapterResult(emptyList(), note)
         }

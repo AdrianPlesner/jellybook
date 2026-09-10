@@ -156,6 +156,51 @@ class Mp4ChapterParserTest {
     }
 
     @Test
+    fun aChildDeclaringSizeZeroDoesNotHideTheChaptersInsideIt() = runTest {
+        // Size zero means "runs to the end of the container". Treating it as the end of the tree loses the atom itself.
+        val chapters = chpl(listOf(0L to "One", 200_000L to "Two"))
+        val openEndedUdta = u32(0) + "udta".toByteArray(Charsets.ISO_8859_1) + chapters
+        val file = ftyp() + moov(mvhd(timescale = 1000, duration = 600_000), openEndedUdta) + mdat(ByteArray(32))
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertEquals(listOf("One", "Two"), result!!.chapters.map { it.title })
+    }
+
+    @Test
+    fun aChildOverrunningItsParentDoesNotHideTheChapterTrack() = runTest {
+        val titles = listOf("Chapter 1", "Chapter 2")
+        val samples = titles.map { textSample(it) }
+        val ftyp = ftyp()
+        val firstSampleOffset = (ftyp.size + 8).toLong()
+        val chapterTrack = trak(
+            tkhd(trackId = 2),
+            mdia(
+                mdhd(timescale = 1000),
+                hdlr("text"),
+                minf(stbl(
+                    stsd("text"),
+                    stts(listOf(2 to 120_000)),
+                    stsc(listOf(Triple(1, 2, 1))),
+                    stsz(samples.map { it.size }),
+                    stco(listOf(firstSampleOffset)),
+                )),
+            ),
+        )
+        val audioTrack = trak(tkhd(trackId = 1), tref(chap(listOf(2))), mdia(mdhd(timescale = 44_100), hdlr("soun"), minf(stbl())))
+        // The chapter track's declared size runs eight bytes past the end of moov, as a sloppy writer can leave it.
+        val overrunning = chapterTrack.copyOf()
+        val declared = ByteBuffer.wrap(overrunning, 0, 4).int + 8
+        ByteBuffer.wrap(overrunning, 0, 4).putInt(declared)
+        val file = ftyp + mdat(samples.fold(ByteArray(0)) { acc, bytes -> acc + bytes }) +
+            moov(mvhd(timescale = 1000, duration = 240_000), audioTrack, overrunning)
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertEquals(titles, result!!.chapters.map { it.title })
+    }
+
+    @Test
     fun rejectsNonMp4Input() = runTest {
         val mp3Header = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0, 0) + ByteArray(64)
 
