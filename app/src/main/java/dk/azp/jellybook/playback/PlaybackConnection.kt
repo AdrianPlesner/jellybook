@@ -11,6 +11,7 @@ import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
+import dk.azp.jellybook.data.model.PlaybackTarget
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -23,14 +24,20 @@ import kotlinx.coroutines.guava.await
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/**
+ * What the UI knows about playback. Positions are book-relative: a multi-file book plays as a playlist, and the part
+ * offsets travel with each item, so the whole app can stay in one timeline.
+ */
 data class PlayerUiState(
-    val mediaId: String? = null,
+    val bookId: String? = null,
+    val partIndex: Int = 0,
+    val partTitle: String? = null,
     val isPlaying: Boolean = false,
     val playWhenReady: Boolean = false,
     val isBuffering: Boolean = false,
     val hasEnded: Boolean = false,
-    val positionMs: Long = 0L,
-    val durationMs: Long = 0L,
+    val bookPositionMs: Long = 0L,
+    val bookDurationMs: Long = 0L,
     val speed: Float = 1f,
     val sleepTimer: SleepTimerState = SleepTimerState.OFF,
     val errorMessage: String? = null,
@@ -89,9 +96,10 @@ class PlaybackConnection(private val context: Context) {
         controller = null
     }
 
-    suspend fun play(mediaItem: MediaItem, startPositionMs: Long) {
+    suspend fun play(items: List<MediaItem>, startPartIndex: Int, startOffsetInPartMs: Long) {
+        if (items.isEmpty()) return
         val active = awaitController()
-        active.setMediaItem(mediaItem, startPositionMs)
+        active.setMediaItems(items, startPartIndex.coerceIn(items.indices), startOffsetInPartMs.coerceAtLeast(0L))
         active.prepare()
         active.play()
     }
@@ -102,19 +110,22 @@ class PlaybackConnection(private val context: Context) {
             active.pause()
         } else {
             if (active.playbackState == Player.STATE_IDLE) active.prepare()
-            if (active.playbackState == Player.STATE_ENDED) active.seekTo(0)
+            if (active.playbackState == Player.STATE_ENDED) active.seekTo(0, 0L)
             active.play()
         }
     }
 
-    fun seekTo(positionMs: Long) {
-        controller?.seekTo(positionMs.coerceAtLeast(0L))
+    fun seekToPart(partIndex: Int, offsetInPartMs: Long) {
+        val active = controller ?: return
+        val index = partIndex.coerceIn(0, (active.mediaItemCount - 1).coerceAtLeast(0))
+        active.seekTo(index, offsetInPartMs.coerceAtLeast(0L))
     }
 
-    fun seekBy(deltaMs: Long) {
-        val active = controller ?: return
-        val duration = active.duration.takeIf { it != C.TIME_UNSET } ?: Long.MAX_VALUE
-        active.seekTo((active.currentPosition + deltaMs).coerceIn(0L, duration))
+    /** Book-relative position of the player right now, or null when it is not playing this book. */
+    fun bookPosition(bookId: String): Long? {
+        val active = controller ?: return null
+        val target = active.currentMediaItem?.let { PlaybackTarget.fromMediaItem(it) } ?: return null
+        return if (target.bookId == bookId) target.bookPositionMs(active.currentPosition) else null
     }
 
     fun setSpeed(speed: Float) {
@@ -146,15 +157,20 @@ class PlaybackConnection(private val context: Context) {
     }
 
     private fun publish(player: Player) {
+        val target = player.currentMediaItem?.let { PlaybackTarget.fromMediaItem(it) }
         stateFlow.update { current ->
             current.copy(
-                mediaId = player.currentMediaItem?.mediaId,
+                bookId = target?.bookId,
+                partIndex = target?.partIndex ?: 0,
+                partTitle = target?.partTitle,
                 isPlaying = player.isPlaying,
                 playWhenReady = player.playWhenReady,
                 isBuffering = player.playbackState == Player.STATE_BUFFERING,
                 hasEnded = player.playbackState == Player.STATE_ENDED,
-                positionMs = player.currentPosition.coerceAtLeast(0L),
-                durationMs = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: current.durationMs,
+                bookPositionMs = target?.bookPositionMs(player.currentPosition.coerceAtLeast(0L)) ?: 0L,
+                bookDurationMs = target?.bookDurationMs?.takeIf { it > 0 }
+                    ?: player.duration.takeIf { it != C.TIME_UNSET && it > 0 }
+                    ?: current.bookDurationMs,
                 speed = player.playbackParameters.speed,
             )
         }

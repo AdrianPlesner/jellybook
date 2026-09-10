@@ -15,6 +15,7 @@ import dk.azp.jellybook.data.local.ServerSession
 import dk.azp.jellybook.data.local.SessionStore
 import dk.azp.jellybook.data.model.Book
 import dk.azp.jellybook.data.model.toBook
+import dk.azp.jellybook.data.model.toDownloadedPart
 import dk.azp.jellybook.playback.BookDownloadService
 import java.io.File
 import java.io.IOException
@@ -23,8 +24,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -35,7 +39,7 @@ import okhttp3.Request
 enum class DownloadStatus { QUEUED, DOWNLOADING, COMPLETED, FAILED, REMOVING }
 
 data class DownloadInfo(
-    val itemId: String,
+    val bookId: String,
     val status: DownloadStatus,
     val percent: Float,
     val bytesDownloaded: Long,
@@ -43,7 +47,8 @@ data class DownloadInfo(
 
 /**
  * Offline copies of audiobooks. The audio goes into the Media3 download cache the player reads from; the metadata needed to
- * list and play the book without the server goes into the offline catalogue.
+ * list and play the book without the server goes into the offline catalogue. A multi-file book downloads as one job per
+ * part, reported to the UI as a single aggregate state.
  */
 class DownloadRepository(
     private val context: Context,
@@ -55,38 +60,44 @@ class DownloadRepository(
     scope: CoroutineScope,
 ) {
 
-    private val downloadsFlow = MutableStateFlow<Map<String, DownloadInfo>>(emptyMap())
+    private val partDownloads = MutableStateFlow<Map<String, Download>>(emptyMap())
+    private val pendingBooks = MutableStateFlow<Set<String>>(emptySet())
     private val coversDir = File(context.filesDir, "covers").apply { mkdirs() }
 
-    val downloads: StateFlow<Map<String, DownloadInfo>> = downloadsFlow
-
     val offlineBooks: Flow<List<Book>> = catalog.downloadedBooks.map { list -> list.sortedBy { it.title }.map { it.toBook() } }
+
+    val downloads: StateFlow<Map<String, DownloadInfo>> =
+        combine(partDownloads, catalog.downloadedBooks, pendingBooks) { parts, books, pending ->
+            books.mapNotNull { book -> aggregate(book, parts, pending)?.let { book.itemId to it } }.toMap()
+        }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     init {
         downloadManager.addListener(object : DownloadManager.Listener {
             override fun onDownloadChanged(downloadManager: DownloadManager, download: Download, finalException: Exception?) {
-                publish(download)
+                partDownloads.update { it + (download.request.id to download) }
             }
 
             override fun onDownloadRemoved(downloadManager: DownloadManager, download: Download) {
-                downloadsFlow.update { it - download.request.id }
+                partDownloads.update { it - download.request.id }
             }
         })
         scope.launch(Dispatchers.IO) { loadExistingDownloads() }
         scope.launch {
             while (isActive) {
-                val active = downloadsFlow.value.values.any { it.status == DownloadStatus.DOWNLOADING }
-                if (active) downloadManager.currentDownloads.forEach(::publish)
-                delay(if (active) ACTIVE_POLL_MS else IDLE_POLL_MS)
+                val active = downloadManager.currentDownloads
+                if (active.isNotEmpty()) {
+                    partDownloads.update { current -> current + active.associateBy { it.request.id } }
+                }
+                delay(if (active.isNotEmpty()) ACTIVE_POLL_MS else IDLE_POLL_MS)
             }
         }
     }
 
-    fun isDownloaded(itemId: String): Boolean = downloadsFlow.value[itemId]?.status == DownloadStatus.COMPLETED
+    fun isDownloaded(bookId: String): Boolean = downloads.value[bookId]?.status == DownloadStatus.COMPLETED
 
-    fun coverFile(itemId: String): File? = File(coversDir, "$itemId.jpg").takeIf { it.exists() }
+    fun coverFile(bookId: String): File? = File(coversDir, "$bookId.jpg").takeIf { it.exists() }
 
-    suspend fun downloadedBook(itemId: String): Book? = catalog.downloadedBook(itemId)?.toBook()
+    suspend fun downloadedBook(bookId: String): Book? = catalog.downloadedBook(bookId)?.toBook()
 
     suspend fun startDownload(book: Book, chapters: List<Chapter>) {
         val session = sessionStore.currentSession() ?: return
@@ -97,62 +108,73 @@ class DownloadRepository(
                 title = book.title,
                 author = book.author,
                 overview = book.overview,
-                durationMs = book.durationMs,
                 imageTag = book.imageTag,
-                mediaSourceId = book.mediaSourceId,
-                container = book.container,
+                imageItemId = book.imageItemId,
                 productionYear = book.productionYear,
+                partList = book.parts.map { it.toDownloadedPart() },
                 chapters = chapters,
                 coverPath = coverPath,
                 downloadedAtEpochMs = System.currentTimeMillis(),
             ),
         )
-        val request = DownloadRequest.Builder(book.id, Uri.parse(client.fileUrl(session.serverUrl, book.id)))
-            .setCustomCacheKey(book.id)
-            .build()
-        downloadsFlow.update { it + (book.id to DownloadInfo(book.id, DownloadStatus.QUEUED, 0f, 0L)) }
-        DownloadService.sendAddDownload(context, BookDownloadService::class.java, request, true)
+        pendingBooks.update { it + book.id }
+        for (part in book.parts) {
+            val request = DownloadRequest.Builder(part.itemId, Uri.parse(client.fileUrl(session.serverUrl, part.itemId)))
+                .setCustomCacheKey(part.itemId)
+                .build()
+            DownloadService.sendAddDownload(context, BookDownloadService::class.java, request, true)
+        }
     }
 
-    suspend fun removeDownload(itemId: String) {
-        DownloadService.sendRemoveDownload(context, BookDownloadService::class.java, itemId, false)
-        catalog.downloadedBook(itemId)?.coverPath?.let { File(it).delete() }
-        catalog.remove(itemId)
-        downloadsFlow.update { it - itemId }
+    suspend fun removeDownload(bookId: String) {
+        val stored = catalog.downloadedBook(bookId)
+        val partIds = stored?.partList?.map { it.itemId } ?: listOf(bookId)
+        for (partId in partIds) {
+            DownloadService.sendRemoveDownload(context, BookDownloadService::class.java, partId, false)
+        }
+        stored?.coverPath?.let { File(it).delete() }
+        catalog.remove(bookId)
+        pendingBooks.update { it - bookId }
+        partDownloads.update { current -> current - partIds.toSet() }
     }
 
     private fun loadExistingDownloads() {
         try {
             downloadManager.downloadIndex.getDownloads().use { cursor ->
-                while (cursor.moveToNext()) publish(cursor.download)
+                val found = mutableMapOf<String, Download>()
+                while (cursor.moveToNext()) found[cursor.download.request.id] = cursor.download
+                partDownloads.update { it + found }
             }
         } catch (e: IOException) {
             Log.w(TAG, "Could not read download index", e)
         }
     }
 
-    private fun publish(download: Download) {
-        downloadsFlow.update { it + (download.request.id to download.toInfo()) }
-    }
-
-    private fun Download.toInfo(): DownloadInfo = DownloadInfo(
-        itemId = request.id,
-        status = when (state) {
-            Download.STATE_DOWNLOADING -> DownloadStatus.DOWNLOADING
-            Download.STATE_COMPLETED -> DownloadStatus.COMPLETED
-            Download.STATE_FAILED -> DownloadStatus.FAILED
-            Download.STATE_REMOVING -> DownloadStatus.REMOVING
+    private fun aggregate(book: DownloadedBook, parts: Map<String, Download>, pending: Set<String>): DownloadInfo? {
+        val partIds = book.partList.map { it.itemId }.ifEmpty { listOf(book.itemId) }
+        val known = partIds.mapNotNull { parts[it] }
+        if (known.isEmpty()) {
+            return if (book.itemId in pending) DownloadInfo(book.itemId, DownloadStatus.QUEUED, 0f, 0L) else null
+        }
+        val states = known.map { it.state }
+        val status = when {
+            states.any { it == Download.STATE_FAILED } -> DownloadStatus.FAILED
+            states.any { it == Download.STATE_REMOVING } -> DownloadStatus.REMOVING
+            known.size == partIds.size && states.all { it == Download.STATE_COMPLETED } -> DownloadStatus.COMPLETED
+            states.any { it == Download.STATE_DOWNLOADING } -> DownloadStatus.DOWNLOADING
             else -> DownloadStatus.QUEUED
-        },
-        percent = percentDownloaded.coerceAtLeast(0f),
-        bytesDownloaded = bytesDownloaded,
-    )
+        }
+        val completed = states.count { it == Download.STATE_COMPLETED }
+        val inFlight = known.sumOf { it.percentDownloaded.coerceIn(0f, 100f).toDouble() } - completed * 100.0
+        val percent = ((completed * 100.0 + inFlight.coerceAtLeast(0.0)) / partIds.size).toFloat().coerceIn(0f, 100f)
+        return DownloadInfo(book.itemId, status, percent, known.sumOf { it.bytesDownloaded })
+    }
 
     private suspend fun downloadCover(session: ServerSession, book: Book): String? = withContext(Dispatchers.IO) {
         val tag = book.imageTag ?: return@withContext null
         val target = File(coversDir, "${book.id}.jpg")
         try {
-            val request = Request.Builder().url(client.primaryImageUrl(session.serverUrl, book.id, tag, COVER_HEIGHT_PX)).build()
+            val request = Request.Builder().url(client.primaryImageUrl(session.serverUrl, book.imageItemId, tag, COVER_HEIGHT_PX)).build()
             httpClient.newCall(request).execute().use { response ->
                 val body = response.body
                 if (!response.isSuccessful || body == null) return@withContext null

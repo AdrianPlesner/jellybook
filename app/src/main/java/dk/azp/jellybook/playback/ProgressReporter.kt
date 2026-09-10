@@ -1,6 +1,5 @@
 package dk.azp.jellybook.playback
 
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import dk.azp.jellybook.data.model.PlaybackTarget
@@ -12,7 +11,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** Translates player events into progress reports: start, a heartbeat while playing, pause, stop and finished. */
+/**
+ * Translates player events into progress reports. Reports are per part, because that is what Jellyfin can store; the
+ * repository puts them back on the book timeline. A part the player advances past on its own is reported as finished, so
+ * the server knows how far into a multi-file book the listener is.
+ */
 class ProgressReporter(
     private val player: Player,
     private val repository: ProgressRepository,
@@ -26,15 +29,24 @@ class ProgressReporter(
     private var ticker: Job? = null
 
     override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-        stopCurrent()
+        val completed = reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO
+        finishCurrent(partCompleted = completed)
         current = mediaItem?.let { PlaybackTarget.fromMediaItem(it) }
-        playSessionId = UUID.randomUUID().toString()
+        // Parts of one book share a play session so the server sees continuous listening rather than a new session per file.
+        if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) playSessionId = UUID.randomUUID().toString()
         started = false
         lastPositionMs = player.currentPosition.coerceAtLeast(0L)
+        if (completed && player.isPlaying) {
+            val target = current ?: return
+            started = true
+            val sessionId = playSessionId
+            scope.launch { repository.onPlaybackStarted(target, sessionId, 0L) }
+            startTicker(target, sessionId)
+        }
     }
 
     override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
-        val sameItem = oldPosition.mediaItem?.mediaId == newPosition.mediaItem?.mediaId
+        val sameItem = oldPosition.mediaItemIndex == newPosition.mediaItemIndex
         lastPositionMs = if (sameItem) newPosition.positionMs else oldPosition.positionMs
     }
 
@@ -46,7 +58,7 @@ class ProgressReporter(
             if (!started) {
                 started = true
                 val position = lastPositionMs
-                scope.launch { repository.onPlaybackStarted(withDuration(target), sessionId, position) }
+                scope.launch { repository.onPlaybackStarted(target, sessionId, position) }
             }
             startTicker(target, sessionId)
         } else {
@@ -54,22 +66,17 @@ class ProgressReporter(
             ticker = null
             if (started && player.playbackState != Player.STATE_ENDED) {
                 val position = lastPositionMs
-                scope.launch { repository.onPlaybackProgress(withDuration(target), sessionId, position, paused = true) }
+                scope.launch { repository.onPlaybackProgress(target, sessionId, position, paused = true) }
             }
         }
     }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         if (playbackState != Player.STATE_ENDED) return
-        val target = current ?: return
-        ticker?.cancel()
-        ticker = null
-        val sessionId = playSessionId
-        started = false
-        scope.launch { repository.onPlaybackFinished(withDuration(target), sessionId) }
+        finishCurrent(partCompleted = true)
     }
 
-    fun release() = stopCurrent()
+    fun release() = finishCurrent(partCompleted = false)
 
     private fun startTicker(target: PlaybackTarget, sessionId: String) {
         ticker?.cancel()
@@ -77,12 +84,12 @@ class ProgressReporter(
             while (isActive) {
                 delay(HEARTBEAT_INTERVAL_MS)
                 lastPositionMs = player.currentPosition.coerceAtLeast(0L)
-                repository.onPlaybackProgress(withDuration(target), sessionId, lastPositionMs, paused = false)
+                repository.onPlaybackProgress(target, sessionId, lastPositionMs, paused = false)
             }
         }
     }
 
-    private fun stopCurrent() {
+    private fun finishCurrent(partCompleted: Boolean) {
         ticker?.cancel()
         ticker = null
         val target = current ?: return
@@ -90,12 +97,13 @@ class ProgressReporter(
         started = false
         val sessionId = playSessionId
         val position = lastPositionMs
-        scope.launch { repository.onPlaybackStopped(withDuration(target), sessionId, position) }
-    }
-
-    private fun withDuration(target: PlaybackTarget): PlaybackTarget {
-        val duration = player.duration
-        return if (duration != C.TIME_UNSET && duration > 0 && player.currentMediaItem?.mediaId == target.itemId) target.copy(durationMs = duration) else target
+        scope.launch {
+            if (partCompleted) {
+                repository.onPartFinished(target, sessionId)
+            } else {
+                repository.onPlaybackStopped(target, sessionId, position)
+            }
+        }
     }
 
     private companion object {

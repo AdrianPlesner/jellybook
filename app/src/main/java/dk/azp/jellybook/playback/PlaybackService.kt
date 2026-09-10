@@ -54,7 +54,12 @@ class PlaybackService : MediaSessionService() {
         serviceScope.launch { player.setPlaybackSpeed(container.sessionStore.playbackSpeed.first()) }
         serviceScope.launch {
             container.progressRepository.checkpointApplied.collect { applied ->
-                if (player.currentMediaItem?.mediaId == applied.itemId) player.seekTo(applied.positionMs)
+                val target = player.currentMediaItem?.let { PlaybackTarget.fromMediaItem(it) }
+                if (target?.bookId == applied.bookId) {
+                    val book = runCatching { container.bookRepository.book(applied.bookId) }.getOrNull() ?: return@collect
+                    val split = book.toPartPosition(applied.positionMs)
+                    player.seekTo(split.partIndex, split.offsetMs)
+                }
             }
         }
     }
@@ -177,17 +182,14 @@ class PlaybackService : MediaSessionService() {
             isForPlayback: Boolean,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future {
             val recent = container.progressRepository.mostRecentlyPlayed() ?: throw UnsupportedOperationException("Nothing to resume")
-            val target = PlaybackTarget(
-                itemId = recent.itemId,
-                title = recent.title,
-                author = recent.author,
-                imageTag = recent.imageTag,
-                mediaSourceId = recent.mediaSourceId,
-                durationMs = recent.durationMs,
-                coverPath = container.downloadRepository.coverFile(recent.itemId)?.absolutePath,
-            )
-            val item = container.mediaItemFactory.create(target) ?: throw UnsupportedOperationException("Not signed in")
-            MediaSession.MediaItemsWithStartPosition(listOf(item), 0, recent.positionMs)
+            val book = container.downloadRepository.downloadedBook(recent.itemId)
+                ?: runCatching { container.bookRepository.book(recent.itemId) }.getOrNull()
+                ?: throw UnsupportedOperationException("Cannot reach the server")
+            val coverPath = container.downloadRepository.coverFile(book.id)?.absolutePath
+            val items = container.mediaItemFactory.create(book, coverPath)
+            if (items.isEmpty()) throw UnsupportedOperationException("Not signed in")
+            val split = book.toPartPosition(recent.positionMs)
+            MediaSession.MediaItemsWithStartPosition(items, split.partIndex, split.offsetMs)
         }
     }
 

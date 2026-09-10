@@ -1,0 +1,81 @@
+package dk.azp.jellybook.data
+
+import dk.azp.jellybook.data.jellyfin.BaseItemDto
+import dk.azp.jellybook.data.jellyfin.JellyfinClient
+import dk.azp.jellybook.data.local.ServerSession
+import dk.azp.jellybook.data.local.SessionStore
+import dk.azp.jellybook.data.model.Book
+import dk.azp.jellybook.data.model.multiPartBook
+import dk.azp.jellybook.data.model.toSingleFileBook
+import java.io.IOException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+
+/**
+ * Turns Jellyfin's item tree into books.
+ *
+ * Jellyfin has no notion of a multi-file audiobook: a folder of mp3s becomes one `AudioBook` item per file, sharing the
+ * folder as their parent. Grouping the flat recursive listing by parent id would be wrong, because Jellyfin parents a
+ * single-file book directly to the library root, which would then merge every such book into one. So the library is walked
+ * top down instead: a folder whose direct children are audio files is one book, a folder of folders is a level of
+ * organisation to descend into.
+ */
+class BookRepository(
+    private val client: JellyfinClient,
+    private val sessionStore: SessionStore,
+) {
+
+    suspend fun library(): List<Book> {
+        val session = sessionStore.currentSession() ?: throw IOException("Not signed in")
+        val views = client.userViews(session.serverUrl, session.userId)
+        val bookViews = views.filter { it.collectionType == COLLECTION_TYPE_BOOKS }.ifEmpty { views }
+        return coroutineScope {
+            bookViews.map { view -> async { booksUnder(session, view.id, depth = 0) } }.awaitAll().flatten()
+        }.sortedBy { it.title.lowercase() }
+    }
+
+    /** Loads one book by the id the library handed out: an audio item for a single-file book, a folder for a multi-part one. */
+    suspend fun book(bookId: String): Book {
+        val session = sessionStore.currentSession() ?: throw IOException("Not signed in")
+        val item = client.item(session.serverUrl, session.userId, bookId)
+        return if (item.isFolder) {
+            val parts = audioParts(session, item.id)
+            if (parts.isEmpty()) throw IOException("No audio files in ${item.displayTitle}") else multiPartBook(item, parts)
+        } else {
+            item.toSingleFileBook()
+        }
+    }
+
+    private suspend fun booksUnder(session: ServerSession, parentId: String, depth: Int): List<Book> = coroutineScope {
+        val children = client.children(session.serverUrl, session.userId, parentId)
+        val singles = children.filter { it.isAudioItem }.map { it.toSingleFileBook() }
+        val folders = children.filter { it.isFolder && it.childCount != 0 }
+        val nested = folders.map { folder -> async { resolveFolder(session, folder, depth) } }.awaitAll().flatten()
+        singles + nested
+    }
+
+    private suspend fun resolveFolder(session: ServerSession, folder: BaseItemDto, depth: Int): List<Book> {
+        val parts = audioParts(session, folder.id)
+        return when {
+            parts.isNotEmpty() -> listOf(multiPartBook(folder, parts))
+            depth >= MAX_DEPTH -> emptyList()
+            else -> booksUnder(session, folder.id, depth + 1)
+        }
+    }
+
+    private suspend fun audioParts(session: ServerSession, folderId: String): List<BaseItemDto> =
+        client.children(session.serverUrl, session.userId, folderId).filter { it.isAudioItem }.sortedWith(partOrder)
+
+    private companion object {
+        const val COLLECTION_TYPE_BOOKS = "books"
+        const val MAX_DEPTH = 3
+
+        /** Disc, then track number from the file tags, then the name the server sorted by. */
+        val partOrder = compareBy<BaseItemDto>(
+            { it.parentIndexNumber ?: 0 },
+            { it.indexNumber ?: Int.MAX_VALUE },
+            { it.displayTitle.lowercase() },
+        )
+    }
+}
