@@ -119,6 +119,43 @@ class Mp4ChapterParserTest {
     }
 
     @Test
+    fun readsChapterTitlesScatteredAcrossALargeMdat() = runTest {
+        // A long audiobook stores its chapter titles in separate chunks far apart, so they cannot be read in one go.
+        val titles = (1..16).map { "Chapter $it" }
+        val samples = titles.map { textSample(it) }
+        val gap = 300_000
+        val ftyp = ftyp()
+        val mdatStart = ftyp.size + 8
+        val payload = ByteArray(gap * samples.size + 64)
+        val offsets = samples.mapIndexed { index, sample ->
+            val at = index * gap
+            sample.copyInto(payload, at)
+            (mdatStart + at).toLong()
+        }
+        val chapterTrack = trak(
+            tkhd(trackId = 7),
+            mdia(
+                mdhd(timescale = 1000),
+                hdlr("text"),
+                minf(stbl(
+                    stsd("text"),
+                    stts(listOf(samples.size to 60_000)),
+                    stsc(listOf(Triple(1, 1, 1))),
+                    stsz(samples.map { it.size }),
+                    stco(offsets),
+                )),
+            ),
+        )
+        val audioTrack = trak(tkhd(trackId = 1), tref(chap(listOf(7))), mdia(mdhd(timescale = 44_100), hdlr("soun"), minf(stbl())))
+        val file = ftyp + mdat(payload) + moov(mvhd(timescale = 1000, duration = 16 * 60_000), audioTrack, chapterTrack)
+
+        val result = Mp4ChapterParser(ByteArraySource(file)).parse()
+
+        assertEquals(titles, result!!.chapters.map { it.title })
+        assertEquals(listOf(0L, 60_000L, 120_000L), result.chapters.take(3).map { it.startMs })
+    }
+
+    @Test
     fun rejectsNonMp4Input() = runTest {
         val mp3Header = byteArrayOf('I'.code.toByte(), 'D'.code.toByte(), '3'.code.toByte(), 3, 0, 0, 0, 0, 0, 0) + ByteArray(64)
 

@@ -6,6 +6,9 @@ import androidx.media3.datasource.DataSource
 import dk.azp.jellybook.data.local.OfflineCatalog
 import dk.azp.jellybook.data.model.Book
 
+/** Chapters, plus why there are none, so the book screen can say more than "no chapters". */
+data class ChapterResult(val chapters: List<Chapter>, val note: String? = null)
+
 /**
  * Chapter markers for a book: Jellyfin's own chapter list when the server extracted one, otherwise the markers embedded in
  * the m4b file, parsed over byte ranges and cached on the device.
@@ -19,32 +22,34 @@ class ChapterRepository(
     private val catalog: OfflineCatalog,
 ) {
 
-    suspend fun chaptersFor(book: Book, mediaUri: Uri): List<Chapter> {
-        if (book.serverChapters.size >= MIN_USEFUL_CHAPTER_COUNT) return book.serverChapters
-        catalog.cachedChapters(book.id)?.takeIf { it.isNotEmpty() }?.let { return it }
+    suspend fun chaptersFor(book: Book, mediaUri: Uri): ChapterResult {
+        if (book.serverChapters.size >= MIN_USEFUL_CHAPTER_COUNT) return ChapterResult(book.serverChapters)
+        catalog.cachedChapters(book.id)?.takeIf { it.isNotEmpty() }?.let { return ChapterResult(it) }
         return parseFromFile(book, mediaUri)
     }
 
-    private suspend fun parseFromFile(book: Book, mediaUri: Uri): List<Chapter> {
+    private suspend fun parseFromFile(book: Book, mediaUri: Uri): ChapterResult {
         val container = book.container?.lowercase()
         if (container != null && container !in MP4_CONTAINERS) {
-            Log.d(TAG, "No chapters for ${book.title}: $container is not a container that carries markers")
-            return emptyList()
+            val note = "A $container file cannot carry chapter markers; only m4b and mp4 can."
+            Log.d(TAG, "No chapters for ${book.title}: $note")
+            return ChapterResult(emptyList(), note)
         }
         return try {
             val parsed = Mp4ChapterParser(DataSourceRandomAccessSource(dataSourceFactory, mediaUri, book.id)).parse()
             val chapters = parsed?.chapters ?: emptyList()
-            if (chapters.isEmpty()) {
-                val reason = if (parsed == null) "not an MP4 container" else "no chpl atom and no chapter track"
-                Log.d(TAG, "No chapters found in ${book.title}: $reason")
-            } else {
-                catalog.cacheChapters(book.id, chapters)
-                Log.d(TAG, "Read ${chapters.size} chapters from ${book.title}")
-            }
-            chapters
+            when {
+                chapters.isNotEmpty() -> {
+                    catalog.cacheChapters(book.id, chapters)
+                    Log.d(TAG, "Read ${chapters.size} chapters from ${book.title}")
+                    ChapterResult(chapters)
+                }
+                parsed == null -> ChapterResult(emptyList(), "The file does not begin like an MP4 container.")
+                else -> ChapterResult(emptyList(), "The file has no chapter markers the app can read.")
+            }.also { if (it.chapters.isEmpty()) Log.d(TAG, "No chapters in ${book.title}: ${it.note}") }
         } catch (e: Exception) {
             Log.w(TAG, "Could not read chapters for ${book.title}", e)
-            emptyList()
+            ChapterResult(emptyList(), "Could not read the file: ${e.javaClass.simpleName} ${e.message.orEmpty()}".trim())
         }
     }
 

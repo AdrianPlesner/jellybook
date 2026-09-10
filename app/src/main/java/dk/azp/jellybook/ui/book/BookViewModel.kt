@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.MediaItem
 import dk.azp.jellybook.AppContainer
 import dk.azp.jellybook.data.chapters.Chapter
+import dk.azp.jellybook.data.chapters.ChapterResult
 import dk.azp.jellybook.data.downloads.DownloadInfo
 import dk.azp.jellybook.data.local.Bookmark
 import dk.azp.jellybook.data.model.Book
@@ -31,6 +32,7 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         val download: DownloadInfo? = null,
         val isOfflineCopy: Boolean = false,
         val coverModel: Any? = null,
+        val chapterNote: String? = null,
         val message: String? = null,
     )
 
@@ -176,15 +178,17 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
                     awaitingConflict = start is ProgressRepository.StartPosition.Conflict,
                 )
             }
-            stateFlow.update { it.copy(chapters = chaptersFor(book)) }
+            val chapters = chaptersFor(book)
+            stateFlow.update { it.copy(chapters = chapters.chapters, chapterNote = chapters.note) }
             launch { container.bookmarkRepository.sync(bookId) }
         }
     }
 
     /** A multi-file book gets its chapters from the files themselves; a single file may need its markers parsed. */
-    private suspend fun chaptersFor(book: Book): List<Chapter> {
-        val firstPart = book.parts.firstOrNull() ?: return emptyList()
-        val mediaUri = container.mediaItemFactory.mediaUri(firstPart.itemId) ?: return book.serverChapters
+    private suspend fun chaptersFor(book: Book): ChapterResult {
+        val firstPart = book.parts.firstOrNull() ?: return ChapterResult(emptyList())
+        if (book.isMultiPart) return ChapterResult(book.serverChapters)
+        val mediaUri = container.mediaItemFactory.mediaUri(firstPart.itemId) ?: return ChapterResult(book.serverChapters)
         return container.chapterRepository.chaptersFor(book, mediaUri)
     }
 

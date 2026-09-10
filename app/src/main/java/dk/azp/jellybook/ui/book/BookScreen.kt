@@ -159,7 +159,10 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                 }
                 if (listTab == 0) {
                     if (state.chapters.isEmpty()) {
-                        item { HintText("This file has no chapter markers. Use the slider or bookmarks to navigate.") }
+                        item {
+                            val reason = state.chapterNote ?: "This file has no chapter markers."
+                            HintText("$reason Use the slider or bookmarks to navigate.")
+                        }
                     }
                     items(state.chapters, key = { it.index }) { chapter ->
                         ChapterRow(chapter, isCurrent = chapter == currentChapter, onClick = { viewModel.seekTo(chapter.startMs) })
