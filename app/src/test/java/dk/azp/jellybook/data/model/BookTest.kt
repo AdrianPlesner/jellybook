@@ -142,7 +142,7 @@ class BookTest {
 
     @Test
     fun partsWhoseFilesAllCarryTheSameNameGetPositionalTitles() {
-        val items = (1..4).map { item("p$it", 120_000, name = "Mythos (Unabridged)") }
+        val items = (1..4).map { item("p$it", 120_000, name = "The Long Journey (Unabridged)") }
 
         val parts = items.toParts()
 
@@ -158,7 +158,7 @@ class BookTest {
 
     @Test
     fun chaptersOfIdenticallyNamedPartsAreNumbered() {
-        val items = (1..3).map { item("p$it", 120_000, name = "Mythos (Unabridged)") }
+        val items = (1..3).map { item("p$it", 120_000, name = "The Long Journey (Unabridged)") }
         val parts = items.toParts()
 
         val chapters = chaptersOf(parts, items, multiPart = true)

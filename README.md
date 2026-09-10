@@ -128,13 +128,16 @@ different key and can no longer update an installed copy of the app.
 
 ### Diagnosing missing chapters
 
-`tools/inspect-chapters.py <server> <user> <password>` reports, per book, how many chapters the server extracted and what
-the file itself carries: a Nero `chpl` atom, a QuickTime chapter track, or an iTunes free-form tag such as OverDrive's
-MediaMarkers. It reads a handful of byte ranges rather than downloading anything, and says which of the three cases a book
-falls into, so "the file has no markers" can be told apart from "the app cannot read them".
+`tools/inspect-chapters.py <server> <user>` reports, per book, how many chapters the server extracted and what the file
+itself carries: a Nero `chpl` atom, a QuickTime chapter track, or an iTunes free-form tag such as OverDrive's MediaMarkers.
+It reads a handful of byte ranges rather than downloading anything, and says which of the cases a book falls into, so "the
+file has no markers" can be told apart from "the app cannot read them".
+
+It prompts for the password rather than taking it on the command line, and hides titles, tag values and file sizes so its
+output can be pasted into a bug report. Add `--show-titles` when you want the names too.
 
 ```bash
-tools/inspect-chapters.py http://jellyfin.local:8096 me hunter2 --title "Book name"
+tools/inspect-chapters.py http://jellyfin.local:8096 me --title "Book name"
 ```
 
 ### Test server

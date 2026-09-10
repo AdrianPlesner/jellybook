@@ -108,8 +108,8 @@ fun UserItemDataDto.toRemoteProgress(): RemoteProgress = RemoteProgress(
 )
 
 /**
- * Positional labels for parts whose own titles say nothing. A rip that tags every file with the book's name gives 166 parts
- * all called the same thing, which is useless as a chapter list.
+ * Positional labels for parts whose own titles say nothing. A rip that tags every file with the book's name gives every
+ * part the same title, which is useless as a chapter list.
  */
 private fun List<BookPart>.withUsefulTitles(): List<BookPart> {
     val distinct = map { it.title.trim().lowercase() }.filter { it.isNotEmpty() }.distinct()

@@ -5,11 +5,16 @@ Answers the two questions that matter when chapters do not show up in the app: d
 *file* actually contain markers. It reads only a few byte ranges of each file, looking for exactly what the app looks for:
 a Nero `chpl` atom, or a QuickTime chapter text track.
 
-    tools/inspect-chapters.py http://jellyfin.local:8096 USER PASSWORD
-    tools/inspect-chapters.py http://jellyfin.local:8096 USER PASSWORD --title "Book name"
+By default it prints only structural facts, no titles or file sizes, so its output is safe to paste into a bug report. Pass
+--show-titles when you want the names as well.
+
+    tools/inspect-chapters.py http://jellyfin.local:8096 me
+    tools/inspect-chapters.py http://jellyfin.local:8096 me --title "Book name" --show-titles
 """
 import argparse
+import getpass
 import json
+import os
 import struct
 import sys
 import urllib.error
@@ -17,9 +22,15 @@ import urllib.parse
 import urllib.request
 
 CLIENT = 'MediaBrowser Client="inspect-chapters", Device="script", DeviceId="inspect-chapters", Version="1.0"'
+SHOW_TITLES = False
 MP4_TOP_LEVEL = {"ftyp", "moov", "mdat", "free", "skip", "wide", "pnot", "uuid", "styp", "sidx", "meta"}
 CONTAINER_ATOMS = {"moov", "trak", "mdia", "minf", "stbl", "udta", "tref"}
 TICKS_PER_MS = 10_000
+
+
+def shown(text: object) -> str:
+    """Titles and other library content, withheld unless the caller asked to see them."""
+    return repr(text) if SHOW_TITLES else "<hidden>"
 
 
 class Server:
@@ -236,7 +247,8 @@ def describe_itunes_tags(blob: bytes, payload: int, end: int) -> bool:
             payload_text = blob[data_box[0] + 8:data_box[1]].decode("utf-8", "replace")
             markers = payload_text.count("<Marker>")
             print(f"    iTunes free-form tag {tag_name!r}: {markers} marker(s)")
-            print(f"      {payload_text[:160].replace(chr(10), ' ')!r}")
+            if SHOW_TITLES:
+                print(f"      {payload_text[:160].replace(chr(10), ' ')!r}")
             found_markers = True
     if labels:
         print(f"    iTunes metadata tags: {', '.join(sorted(set(labels)))}")
@@ -412,7 +424,7 @@ def derive_chapters(reader: RangeReader, blob: bytes, payload: int, end: int) ->
     print(f"    app algorithm: movie duration {duration / 1000:.0f}s, source={source}, "
           f"{len(starts)} marker(s) found, {len(kept)} kept after the duration filter")
     for position, title in kept[:6]:
-        print(f"      {position / 1000:9.1f}s  {title!r}")
+        print(f"      {position / 1000:9.1f}s  {shown(title)}")
     if len(kept) > 6:
         print(f"      ... and {len(kept) - 6} more")
     if starts and not kept:
@@ -420,18 +432,19 @@ def derive_chapters(reader: RangeReader, blob: bytes, payload: int, end: int) ->
 
 
 def inspect(server: Server, item: dict) -> None:
-    name = item.get("Name")
-    print(f"\n=== {name} ===")
+    print(f"\n=== {shown(item.get('Name'))} ===")
     server_chapters = item.get("Chapters") or []
     sources = item.get("MediaSources") or []
     container = item.get("Container") or (sources[0].get("Container") if sources else None)
     size = sources[0].get("Size") if sources else None
     duration = (item.get("RunTimeTicks") or 0) / 1e7
+    size_text = (f"{size / 1e6:.1f} MB" if size else "unknown") if SHOW_TITLES else "<hidden>"
     print(f"  server reports {len(server_chapters)} chapter(s); container={container!r}; "
-          f"size={f'{size / 1e6:.1f} MB' if size else 'unknown'}; length={duration / 60:.0f} min")
-    print(f"  grouping tags: album={item.get('Album')!r} track={item.get('IndexNumber')} disc={item.get('ParentIndexNumber')}")
+          f"size={size_text}; length={duration / 60:.0f} min")
+    print(f"  grouping tags: album={shown(item.get('Album'))} track={item.get('IndexNumber')} "
+          f"disc={item.get('ParentIndexNumber')}")
     for chapter in server_chapters[:5]:
-        print(f"    {chapter.get('StartPositionTicks', 0) // TICKS_PER_MS / 1000:8.1f}s  {chapter.get('Name')!r}")
+        print(f"    {chapter.get('StartPositionTicks', 0) // TICKS_PER_MS / 1000:8.1f}s  {shown(chapter.get('Name'))}")
     if len(server_chapters) > 5:
         print(f"    ... and {len(server_chapters) - 5} more")
 
@@ -451,7 +464,7 @@ def inspect(server: Server, item: dict) -> None:
         entries = read_chpl(blob, chpl[0], chpl[1])
         print(f"    Nero chpl atom: {len(entries)} entry(ies)")
         for position, title in entries[:5]:
-            print(f"      {position / 1000:8.1f}s  {title!r}")
+            print(f"      {position / 1000:8.1f}s  {shown(title)}")
         if len(entries) > 5:
             print(f"      ... and {len(entries) - 5} more")
     else:
@@ -480,14 +493,19 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("server")
     parser.add_argument("user")
-    parser.add_argument("password")
+    parser.add_argument("--password", help="omit to be prompted, or set JELLYFIN_PASSWORD")
     parser.add_argument("--title", help="only inspect books whose name contains this text")
     parser.add_argument("--limit", type=int, default=5, help="how many books to inspect (default 5)")
+    parser.add_argument("--show-titles", action="store_true", help="include titles and tag values in the output")
     args = parser.parse_args()
 
+    global SHOW_TITLES
+    SHOW_TITLES = args.show_titles
+
+    password = args.password or os.environ.get("JELLYFIN_PASSWORD") or getpass.getpass(f"Password for {args.user}: ")
     server = Server(args.server)
     try:
-        account = server.login(args.user, args.password)
+        account = server.login(args.user, password)
     except urllib.error.HTTPError as error:
         print(f"sign-in failed: HTTP {error.code}", file=sys.stderr)
         return 1
@@ -498,12 +516,14 @@ def main() -> int:
         "IncludeItemTypes": "AudioBook,Audio",
         "Recursive": "true",
         "SortBy": "SortName",
-        "Fields": "Chapters,MediaSources,Path,Container",
+        "Fields": "Chapters,MediaSources,Container",
     })
     items = server.get_json(f"Items?{query}")["Items"]
     if args.title:
         items = [i for i in items if args.title.lower() in (i.get("Name") or "").lower()]
     print(f"{len(items)} matching audio item(s); inspecting up to {args.limit}")
+    if not SHOW_TITLES:
+        print("titles and sizes are hidden; pass --show-titles to include them")
     for item in items[:args.limit]:
         inspect(server, item)
     return 0
