@@ -45,7 +45,7 @@ class ChapterRepository(
                     ChapterResult(chapters)
                 }
                 parsed == null -> ChapterResult(emptyList(), "The file does not begin like an MP4 container.")
-                else -> ChapterResult(emptyList(), "The file has no chapter markers the app can read.")
+                else -> ChapterResult(emptyList(), "No readable chapter markers. ${parsed.trace}")
             }.also { if (it.chapters.isEmpty()) Log.d(TAG, "No chapters in ${book.title}: ${it.note}") }
         } catch (e: Exception) {
             Log.w(TAG, "Could not read chapters for ${book.title}", e)
