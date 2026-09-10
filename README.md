@@ -51,8 +51,21 @@ reverse: the book position is the most recently played unfinished file plus its 
 file. Jellyfin's own UI then shows a sensible played count for the folder, and other clients resume in the right file.
 
 Grouping walks the library top down, because grouping a flat item listing by parent id would be wrong: Jellyfin parents a
-single-file book directly to the library root, which would merge every such book into one. A folder whose direct children
-are audio files is one book; a folder of folders is a level of organisation to descend into, up to three levels deep.
+single-file book directly to the library root, which would merge every such book into one. A folder of folders is a level
+of organisation to descend into, up to three levels deep.
+
+A folder of audio files is ambiguous, though: it can be one book split across files, or several complete books sharing a
+folder. Jellyfin cannot say which, so the files' own metadata decides:
+
+| Signal | One book split into files | Separate books |
+| --- | --- | --- |
+| Album tag | every file carries the book's title | each file carries its own title |
+| Chapter markers | the files have none of their own | each file has its own |
+| Track numbers | numbered in sequence | absent |
+
+Album and track numbers outweigh chapter markers, because a long book is sometimes split into a few files that each keep
+their own chapters. With no metadata at all, files under about 70 minutes are treated as parts of one book and longer ones
+as separate books.
 
 ### Sync rules
 
@@ -139,5 +152,6 @@ app/src/main/java/dk/azp/jellybook/
 
 - The library is assembled client side, so very large libraries are fetched in full rather than paged.
 - Files are ordered by disc and track tags, falling back to name; a folder with neither tagged nor sortable names may order wrongly.
+- Whether a folder of audio files is one book or several is inferred from tags and chapter markers, so an untagged library can be grouped wrongly.
 - Bookmarks are merged by id; renaming the same bookmark on two devices while offline keeps the local name.
 - No Android Auto browse tree yet (the media session itself works with Auto/Wear controls).

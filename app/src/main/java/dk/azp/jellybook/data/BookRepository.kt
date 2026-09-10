@@ -18,8 +18,11 @@ import kotlinx.coroutines.coroutineScope
  * Jellyfin has no notion of a multi-file audiobook: a folder of mp3s becomes one `AudioBook` item per file, sharing the
  * folder as their parent. Grouping the flat recursive listing by parent id would be wrong, because Jellyfin parents a
  * single-file book directly to the library root, which would then merge every such book into one. So the library is walked
- * top down instead: a folder whose direct children are audio files is one book, a folder of folders is a level of
- * organisation to descend into.
+ * top down instead.
+ *
+ * A folder of audio files is still ambiguous: it can be one book split into files, or several complete books side by side.
+ * [BookGrouping] decides that from the files' metadata; a folder holding only folders is a level of organisation to
+ * descend into.
  */
 class BookRepository(
     private val client: JellyfinClient,
@@ -39,11 +42,13 @@ class BookRepository(
     suspend fun book(bookId: String): Book {
         val session = sessionStore.currentSession() ?: throw IOException("Not signed in")
         val item = client.item(session.serverUrl, session.userId, bookId)
-        return if (item.isFolder) {
-            val parts = audioParts(session, item.id)
-            if (parts.isEmpty()) throw IOException("No audio files in ${item.displayTitle}") else multiPartBook(item, parts)
-        } else {
-            item.toSingleFileBook()
+        if (!item.isFolder) return item.toSingleFileBook()
+        val parts = audioParts(session, item.id)
+        return when {
+            parts.isEmpty() -> throw IOException("No audio files in ${item.displayTitle}")
+            BookGrouping.looksLikeOneBook(parts) -> multiPartBook(item, parts)
+            // The folder holds several complete books, so it is not a book itself.
+            else -> throw IOException("${item.displayTitle} holds several books")
         }
     }
 
@@ -56,12 +61,19 @@ class BookRepository(
     }
 
     private suspend fun resolveFolder(session: ServerSession, folder: BaseItemDto, depth: Int): List<Book> {
-        val parts = audioParts(session, folder.id)
+        val audio = audioParts(session, folder.id)
         return when {
-            parts.isNotEmpty() -> listOf(multiPartBook(folder, parts))
-            depth >= MAX_DEPTH -> emptyList()
-            else -> booksUnder(session, folder.id, depth + 1)
+            audio.isEmpty() -> if (depth >= MAX_DEPTH) emptyList() else booksUnder(session, folder.id, depth + 1)
+            BookGrouping.looksLikeOneBook(audio) -> listOf(multiPartBook(folder, audio))
+            // A folder of complete books: each file is its own book, and any subfolders still hold books of their own.
+            else -> audio.map { it.toSingleFileBook() } +
+                if (depth >= MAX_DEPTH) emptyList() else nestedBooks(session, folder.id, depth + 1)
         }
+    }
+
+    private suspend fun nestedBooks(session: ServerSession, parentId: String, depth: Int): List<Book> = coroutineScope {
+        val folders = client.children(session.serverUrl, session.userId, parentId).filter { it.isFolder && it.childCount != 0 }
+        folders.map { folder -> async { resolveFolder(session, folder, depth) } }.awaitAll().flatten()
     }
 
     private suspend fun audioParts(session: ServerSession, folderId: String): List<BaseItemDto> =
