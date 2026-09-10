@@ -108,6 +108,27 @@ for spec in "The Quiet Coast:Coast Author" "Winter Lanterns:Lantern Author"; do
   i=$((i + 1))
 done
 
+# A book whose chapters live only in a QuickTime chapter track, with no Nero chpl atom: the Audible-rip shape.
+{
+  echo ";FFMETADATA1"
+  echo "title=Track Only Tales"
+  echo "album=Track Only Tales"
+  echo "artist=Track Author"
+  echo "album_artist=Track Author"
+  for c in 1 2 3 4; do
+    echo "[CHAPTER]"
+    echo "TIMEBASE=1/1000"
+    echo "START=$(( (c - 1) * 45000 ))"
+    echo "END=$(( c * 45000 ))"
+    echo "title=Track only, part $c"
+  done
+} > "$MEDIA/work/track-only.ffmeta"
+mkdir -p "$MEDIA/audiobooks/Track Only Tales"
+docker exec $NAME $FF -hide_banner -loglevel error -y \
+  -f lavfi -i "sine=frequency=520:duration=180" -i /media/work/track-only.ffmeta \
+  -map 0:a -map_metadata 1 -c:a aac -b:a 32k -movflags disable_chpl \
+  "/media/audiobooks/Track Only Tales/Track Only Tales.m4b"
+
 # A multi-file book: one mp3 per chapter in a single folder, tagged like a ripped audiobook.
 i=1
 for spec in "Arrival:150" "The Harbour:180" "Night Watch:90" "Departure:210" "Epilogue:60"; do
@@ -161,7 +182,7 @@ fi
 echo "waiting for scan"
 i=0
 COUNT=0
-while [ "$COUNT" -lt 9 ] && [ $i -lt 60 ]; do
+while [ "$COUNT" -lt 10 ] && [ $i -lt 60 ]; do
   COUNT=$(curl -sf "$BASE/Items?IncludeItemTypes=AudioBook&Recursive=true" -H "$TAUTH" | python3 -c 'import json,sys; print(json.load(sys.stdin)["TotalRecordCount"])' 2>/dev/null || echo 0)
   i=$((i + 1))
   sleep 3

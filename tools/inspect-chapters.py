@@ -243,6 +243,182 @@ def describe_itunes_tags(blob: bytes, payload: int, end: int) -> bool:
     return found_markers
 
 
+
+def movie_duration_ms(blob: bytes, payload: int, end: int) -> int:
+    mvhd = find_child(blob, payload, end, "mvhd")
+    if not mvhd:
+        return 0
+    start = mvhd[0]
+    version = blob[start]
+    cursor = start + 4
+    if version == 1:
+        cursor += 16
+        timescale = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+        duration = struct.unpack(">Q", blob[cursor + 4:cursor + 12])[0]
+    else:
+        cursor += 8
+        timescale = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+        duration = struct.unpack(">I", blob[cursor + 4:cursor + 8])[0]
+    return duration * 1000 // timescale if timescale else 0
+
+
+def sample_table(blob: bytes, stbl: tuple[int, int]) -> list[tuple[int, int, int]] | None:
+    """Returns (file offset, size, time in track units) per sample, as the app builds it."""
+    stts = find_child(blob, *stbl, "stts")
+    stsz = find_child(blob, *stbl, "stsz")
+    stsc = find_child(blob, *stbl, "stsc")
+    stco = find_child(blob, *stbl, "stco")
+    co64 = find_child(blob, *stbl, "co64")
+    if not (stts and stsz and stsc and (stco or co64)):
+        return None
+
+    cursor = stts[0] + 4
+    entries = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+    cursor += 4
+    times: list[int] = []
+    elapsed = 0
+    for _ in range(entries):
+        count, delta = struct.unpack(">II", blob[cursor:cursor + 8])
+        cursor += 8
+        for _ in range(count):
+            if len(times) >= 5000:
+                return None
+            times.append(elapsed)
+            elapsed += delta
+
+    cursor = stsz[0] + 4
+    fixed, count = struct.unpack(">II", blob[cursor:cursor + 8])
+    cursor += 8
+    if fixed:
+        sizes = [fixed] * count
+    else:
+        sizes = list(struct.unpack(f">{count}I", blob[cursor:cursor + 4 * count]))
+
+    cursor = stsc[0] + 4
+    runs_count = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+    cursor += 4
+    runs = []
+    for _ in range(runs_count):
+        first_chunk, per_chunk, _ = struct.unpack(">III", blob[cursor:cursor + 12])
+        cursor += 12
+        runs.append((first_chunk, per_chunk))
+
+    wide = co64 is not None
+    box = co64 or stco
+    cursor = box[0] + 4
+    chunk_count = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+    cursor += 4
+    if wide:
+        offsets = list(struct.unpack(f">{chunk_count}Q", blob[cursor:cursor + 8 * chunk_count]))
+    else:
+        offsets = list(struct.unpack(f">{chunk_count}I", blob[cursor:cursor + 4 * chunk_count]))
+
+    samples = []
+    index = 0
+    for chunk_index, chunk_offset in enumerate(offsets):
+        per_chunk = 0
+        for first_chunk, count_in_chunk in runs:
+            if first_chunk <= chunk_index + 1:
+                per_chunk = count_in_chunk
+        running = chunk_offset
+        for _ in range(per_chunk):
+            if index >= len(sizes):
+                break
+            samples.append((running, sizes[index], times[index] if index < len(times) else 0))
+            running += sizes[index]
+            index += 1
+    return samples
+
+
+def decode_sample_text(data: bytes) -> str:
+    if len(data) < 2:
+        return ""
+    length = (data[0] << 8) | data[1]
+    text = data[2:2 + length]
+    if text[:2] == b"\xfe\xff":
+        return text[2:].decode("utf-16-be", "replace").strip()
+    if text[:2] == b"\xff\xfe":
+        return text[2:].decode("utf-16-le", "replace").strip()
+    return text.decode("utf-8", "replace").strip()
+
+
+def chapter_track_titles(reader: RangeReader, blob: bytes, payload: int, end: int) -> list[tuple[int, str]] | None:
+    """Reads a QuickTime chapter track exactly as the app does, including fetching the title samples."""
+    traks = [(p, s) for kind, p, s, _ in atoms(blob, payload, end) if kind == "trak"]
+    referenced: set[int] = set()
+    tracks = []
+    for start, stop in traks:
+        tkhd = find_child(blob, start, stop, "tkhd")
+        track_id = None
+        if tkhd:
+            version = blob[tkhd[0]]
+            cursor = tkhd[0] + 4 + (16 if version == 1 else 8)
+            track_id = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+        mdia = find_child(blob, start, stop, "mdia")
+        timescale = 0
+        if mdia:
+            mdhd = find_child(blob, mdia[0], mdia[1], "mdhd")
+            if mdhd:
+                version = blob[mdhd[0]]
+                cursor = mdhd[0] + 4 + (16 if version == 1 else 8)
+                timescale = struct.unpack(">I", blob[cursor:cursor + 4])[0]
+        chap = descend(blob, start, stop, ["tref", "chap"])
+        if chap:
+            span = chap[1] - chap[0]
+            referenced.update(
+                struct.unpack(">I", blob[chap[0] + i * 4:chap[0] + i * 4 + 4])[0] for i in range(span // 4)
+            )
+        stbl = descend(blob, start, stop, ["mdia", "minf", "stbl"]) if mdia else None
+        tracks.append({"id": track_id, "timescale": timescale, "stbl": stbl})
+
+    chapter = next((t for t in tracks if t["id"] in referenced and t["stbl"]), None)
+    if chapter is None:
+        return None
+    samples = sample_table(blob, chapter["stbl"])
+    if not samples or not chapter["timescale"]:
+        return None
+
+    first = min(offset for offset, _, _ in samples)
+    last = max(offset + size for offset, size, _ in samples)
+    span = last - first
+    titles = []
+    if span <= 1024 * 1024:
+        block = reader.read(first, span)
+        for offset, size, time in samples:
+            slice_start = offset - first
+            titles.append((time * 1000 // chapter["timescale"], decode_sample_text(block[slice_start:slice_start + size])))
+    else:
+        for offset, size, time in samples:
+            titles.append((time * 1000 // chapter["timescale"], decode_sample_text(reader.read(offset, size))))
+    return titles
+
+
+def derive_chapters(reader: RangeReader, blob: bytes, payload: int, end: int) -> None:
+    """Runs the app's own algorithm and prints the chapter list it would produce."""
+    duration = movie_duration_ms(blob, payload, end)
+    chpl = descend(blob, payload, end, ["udta", "chpl"])
+    nero = read_chpl(blob, chpl[0], chpl[1]) if chpl else []
+    source = "chpl atom"
+    starts = nero
+    if not nero or len(nero) >= 255:
+        try:
+            from_track = chapter_track_titles(reader, blob, payload, end)
+        except (struct.error, IndexError, urllib.error.HTTPError) as error:
+            print(f"    app algorithm: reading the chapter track failed ({type(error).__name__}: {error})")
+            from_track = None
+        if from_track and len(from_track) > len(nero):
+            starts, source = from_track, "chapter track"
+    kept = [entry for entry in sorted(starts) if duration <= 0 or entry[0] < duration]
+    print(f"    app algorithm: movie duration {duration / 1000:.0f}s, source={source}, "
+          f"{len(starts)} marker(s) found, {len(kept)} kept after the duration filter")
+    for position, title in kept[:6]:
+        print(f"      {position / 1000:9.1f}s  {title!r}")
+    if len(kept) > 6:
+        print(f"      ... and {len(kept) - 6} more")
+    if starts and not kept:
+        print("    the duration filter dropped every marker: the parsed duration is too small")
+
+
 def inspect(server: Server, item: dict) -> None:
     name = item.get("Name")
     print(f"\n=== {name} ===")
@@ -281,6 +457,7 @@ def inspect(server: Server, item: dict) -> None:
 
     describe_tracks(blob, payload, end)
     overdrive = describe_itunes_tags(blob, payload, end)
+    derive_chapters(reader, blob, payload, end)
     print(f"    byte-range requests used: {reader.requests}")
 
     chapter_track = any(
