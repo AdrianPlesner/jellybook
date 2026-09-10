@@ -13,7 +13,7 @@ data class Chapter(
     val durationMs: Long get() = (endMs - startMs).coerceAtLeast(0)
 }
 
-data class Mp4Chapters(val durationMs: Long, val chapters: List<Chapter>)
+data class Mp4Chapters(val durationMs: Long, val chapters: List<Chapter>, val trace: String = "")
 
 /** Byte-range access to a file, local or remote. Returns fewer bytes than requested at end of file. */
 interface RandomAccessSource {
@@ -41,12 +41,17 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
         val durationMs = topLevel.firstOrNull { it.type == "mvhd" }?.let { movieDurationMs(it) } ?: 0L
         val neroChapters = readNeroChapters(topLevel)
         val neroMayBeTruncated = neroChapters.isEmpty() || neroChapters.size >= NERO_MAX_CHAPTERS
+        val trace = StringBuilder(
+            "moov@${moov.payloadStart} children=${topLevel.count()} duration=${durationMs / 1000}s chpl=${neroChapters.size}",
+        )
         val starts = if (neroMayBeTruncated) {
-            readChapterTrack(topLevel)?.takeIf { it.size > neroChapters.size } ?: neroChapters
+            readChapterTrack(topLevel, trace)?.takeIf { it.size > neroChapters.size } ?: neroChapters
         } else {
             neroChapters
         }
-        return Mp4Chapters(durationMs, toChapters(starts, durationMs))
+        val chapters = toChapters(starts, durationMs)
+        trace.append(" markers=${starts.size} kept=${chapters.size}")
+        return Mp4Chapters(durationMs, chapters, trace.toString())
     }
 
     /** Walks the top-level atoms until `moov` turns up, wherever the writer put it. */
@@ -80,16 +85,28 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
      * Reads the chapter text track: the one an audio track points at through `tref/chap`, or failing that the first text
      * track. Only that track's sample tables are read, never the audio track's.
      */
-    private suspend fun readChapterTrack(moovChildren: List<AtomRef>): List<ChapterStart>? {
+    private suspend fun readChapterTrack(moovChildren: List<AtomRef>, trace: StringBuilder): List<ChapterStart>? {
         val tracks = moovChildren.filter { it.type == "trak" }.map { describeTrack(it) }
         val referenced = tracks.flatMap { it.chapterRefs }.toSet()
+        trace.append(" tracks=${tracks.size} refs=$referenced")
         val track = tracks.firstOrNull { it.id in referenced && it.stbl != null }
             ?: tracks.firstOrNull { it.stbl != null && it.handler in TEXT_HANDLERS }
-            ?: return null
-        val stbl = track.stbl ?: return null
-        if (track.timescale == 0L || stbl.payloadSize > MAX_SAMPLE_TABLE_BYTES) return null
-        val samples = sampleTable(payloadOf(stbl)) ?: return null
-        if (samples.isEmpty()) return null
+        if (track == null) {
+            trace.append(" chapterTrack=none")
+            return null
+        }
+        val stbl = track.stbl
+        trace.append(" chapterTrack=id${track.id} handler=${track.handler} timescale=${track.timescale} stbl=${stbl?.payloadSize}")
+        if (stbl == null || track.timescale == 0L || stbl.payloadSize > MAX_SAMPLE_TABLE_BYTES) {
+            trace.append(" rejected")
+            return null
+        }
+        val samples = sampleTable(payloadOf(stbl, MAX_SAMPLE_TABLE_BYTES.toInt()))
+        if (samples.isNullOrEmpty()) {
+            trace.append(" samples=${samples?.size ?: -1}")
+            return null
+        }
+        trace.append(" samples=${samples.size}")
         val texts = readSampleTexts(samples)
         return samples.mapIndexed { index, sample -> ChapterStart(toMs(sample.timeUnits, track.timescale), texts[index]) }
     }
