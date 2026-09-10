@@ -41,8 +41,11 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
         val durationMs = topLevel.firstOrNull { it.type == "mvhd" }?.let { movieDurationMs(it) } ?: 0L
         val neroChapters = readNeroChapters(topLevel)
         val neroMayBeTruncated = neroChapters.isEmpty() || neroChapters.size >= NERO_MAX_CHAPTERS
+        val walked = topLevel.lastOrNull()?.payloadEnd ?: moov.payloadStart
         val trace = StringBuilder(
-            "moov@${moov.payloadStart} children=${topLevel.count()} duration=${durationMs / 1000}s chpl=${neroChapters.size}",
+            "moov@${moov.payloadStart} children=${topLevel.count()} " +
+                "walked=${if (walked >= moov.payloadEnd) "all" else "$walked/${moov.payloadEnd}"} " +
+                "duration=${durationMs / 1000}s chpl=${neroChapters.size}",
         )
         val starts = if (neroMayBeTruncated) {
             readChapterTrack(topLevel, trace)?.takeIf { it.size > neroChapters.size } ?: neroChapters
@@ -293,8 +296,15 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
         }
     }
 
-    /** Reads one atom header, which is all that is needed to walk past it or descend into it. */
-    private suspend fun readHeader(offset: Long): Header? {
+    /**
+     * Reads one atom header, which is all that is needed to walk past it or descend into it.
+     *
+     * Real files are not always tidy. An atom may declare size zero, meaning it runs to the end of its container, and one
+     * may declare a size that overruns its parent by a few bytes. Both are tolerated the way a whole-buffer walk would:
+     * clamped to the container, not treated as the end of the tree. Abandoning the walk there would silently drop every
+     * later child, including the chapter track.
+     */
+    private suspend fun readHeader(offset: Long, containerEnd: Long = UNBOUNDED): Header? {
         val bytes = source.read(offset, HEADER_BYTES)
         if (bytes.size < 8) return null
         val buffer = ByteBuffer.wrap(bytes)
@@ -306,8 +316,14 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
             size = ByteBuffer.wrap(bytes, 8, 8).long
             headerSize = 16
         }
+        if (size == 0L) {
+            if (containerEnd == UNBOUNDED) return null
+            size = containerEnd - offset
+        }
         if (size < headerSize) return null
-        return Header(type, offset + headerSize, offset + size)
+        val end = if (containerEnd == UNBOUNDED) offset + size else minOf(containerEnd, offset + size)
+        if (end < offset + headerSize) return null
+        return Header(type, offset + headerSize, end)
     }
 
     /** The direct children of a container atom, found by walking their headers. */
@@ -316,8 +332,8 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
         var offset = parent.payloadStart + skip
         var walking = true
         while (walking && offset + 8 <= parent.payloadEnd && children.size < MAX_CHILDREN) {
-            val header = readHeader(offset)
-            if (header == null || header.end > parent.payloadEnd || header.end <= offset) {
+            val header = readHeader(offset, parent.payloadEnd)
+            if (header == null || header.end <= offset) {
                 walking = false
             } else {
                 children.add(header.toRef())
@@ -356,6 +372,7 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
     }
 
     private companion object {
+        const val UNBOUNDED = Long.MAX_VALUE
         const val HEADER_BYTES = 16
         const val MAX_TOP_LEVEL_ATOMS = 64
         const val MAX_CHILDREN = 64

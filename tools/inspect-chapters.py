@@ -431,6 +431,56 @@ def derive_chapters(reader: RangeReader, blob: bytes, payload: int, end: int) ->
         print("    the duration filter dropped every marker: the parsed duration is too small")
 
 
+def syncsafe(data: bytes) -> int:
+    return (data[0] << 21) | (data[1] << 14) | (data[2] << 7) | data[3]
+
+
+def describe_id3_chapters(reader: RangeReader) -> bool:
+    """mp3 files carry chapters in ID3 CHAP frames, which the app does not read yet."""
+    header = reader.read(0, 10)
+    if len(header) < 10 or header[:3] != b"ID3":
+        print("    ID3 tag: absent")
+        return False
+    major = header[3]
+    tag_size = syncsafe(header[6:10])
+    print(f"    ID3 tag: v2.{major}, {tag_size / 1024:.0f} KB")
+    body = reader.read(10, min(tag_size, 4 * 1024 * 1024))
+    cursor = 0
+    chapters: list[str] = []
+    toc = 0
+    while cursor + 10 <= len(body):
+        frame_id = body[cursor:cursor + 4].decode("latin-1")
+        if not frame_id.strip("\x00"):
+            break
+        raw = body[cursor + 4:cursor + 8]
+        size = syncsafe(raw) if major >= 4 else int.from_bytes(raw, "big")
+        payload = body[cursor + 10:cursor + 10 + size]
+        if frame_id == "CHAP":
+            title = ""
+            element_end = payload.find(b"\x00")
+            sub = payload[element_end + 1 + 16:] if element_end >= 0 else b""
+            while len(sub) >= 10:
+                sub_id = sub[0:4].decode("latin-1")
+                sub_size = syncsafe(sub[4:8]) if major >= 4 else int.from_bytes(sub[4:8], "big")
+                if sub_id == "TIT2":
+                    title = sub[11:10 + sub_size].decode("utf-8", "replace").strip("\x00")
+                    break
+                sub = sub[10 + sub_size:]
+            chapters.append(title)
+        elif frame_id == "CTOC":
+            toc += 1
+        cursor += 10 + size
+    if chapters:
+        print(f"    ID3 CHAP frames: {len(chapters)} ({toc} CTOC)")
+        for index, title in enumerate(chapters[:5]):
+            print(f"      {index + 1:3}. {shown(title)}")
+        if len(chapters) > 5:
+            print(f"      ... and {len(chapters) - 5} more")
+    else:
+        print("    ID3 CHAP frames: none")
+    return bool(chapters)
+
+
 def inspect(server: Server, item: dict) -> None:
     print(f"\n=== {shown(item.get('Name'))} ===")
     server_chapters = item.get("Chapters") or []
@@ -449,6 +499,17 @@ def inspect(server: Server, item: dict) -> None:
         print(f"    ... and {len(server_chapters) - 5} more")
 
     reader = RangeReader(server, item["Id"])
+    if (container or "").lower() in ("mp3", "mpeg", "mpga"):
+        try:
+            found = describe_id3_chapters(reader)
+        except urllib.error.HTTPError as error:
+            print(f"    could not read the file: HTTP {error.code}")
+            return
+        if found:
+            print("    VERDICT: chapters are in ID3 CHAP frames, which the app does not read yet.")
+        else:
+            print("    VERDICT: no chapter markers in this mp3, and none extracted by the server.")
+        return
     try:
         located = locate_moov(reader)
     except urllib.error.HTTPError as error:
