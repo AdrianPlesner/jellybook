@@ -31,8 +31,9 @@ class ChapterRepository(
     private suspend fun parseFromFile(book: Book, mediaUri: Uri): ChapterResult {
         val container = book.container?.lowercase()
         if (container != null && container !in MP4_CONTAINERS) {
-            // mp3 can carry chapters in ID3 frames, which this app does not read yet; say so rather than claiming it cannot.
-            val note = "Chapter markers in $container files are not read yet; m4b and mp4 are."
+            // An mp3 can hold chapters in ID3 frames, but Jellyfin extracts those itself, so if the server reported none
+            // the usual reason is that the file has none. Say that, rather than implying the app is the limitation.
+            val note = "No chapter markers. In a $container file these come from the server, which reported none."
             Log.d(TAG, "No chapters for ${book.title}: $note")
             return ChapterResult(emptyList(), note)
         }
