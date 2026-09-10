@@ -126,6 +126,17 @@ openssl base64 -A -in jellybook.keystore | gh secret set RELEASE_KEYSTORE_BASE64
 Keep the keystore and its password backed up outside the repository. Losing them means future releases are signed with a
 different key and can no longer update an installed copy of the app.
 
+### Diagnosing missing chapters
+
+`tools/inspect-chapters.py <server> <user> <password>` reports, per book, how many chapters the server extracted and what
+the file itself carries: a Nero `chpl` atom, a QuickTime chapter track, or an iTunes free-form tag such as OverDrive's
+MediaMarkers. It reads a handful of byte ranges rather than downloading anything, and says which of the three cases a book
+falls into, so "the file has no markers" can be told apart from "the app cannot read them".
+
+```bash
+tools/inspect-chapters.py http://jellyfin.local:8096 me hunter2 --title "Book name"
+```
+
 ### Test server
 
 `tools/dev-jellyfin.sh` starts a throwaway Jellyfin in Docker with two generated m4b books (chapters and covers included),
@@ -153,5 +164,6 @@ app/src/main/java/dk/azp/jellybook/
 - The library is assembled client side, so very large libraries are fetched in full rather than paged.
 - Files are ordered by disc and track tags, falling back to name; a folder with neither tagged nor sortable names may order wrongly.
 - Whether a folder of audio files is one book or several is inferred from tags and chapter markers, so an untagged library can be grouped wrongly.
+- Chapters are read from Nero `chpl` atoms and QuickTime chapter tracks; markers held only in an iTunes free-form tag (OverDrive rips) are not read yet.
 - Bookmarks are merged by id; renaming the same bookmark on two devices while offline keeps the local name.
 - No Android Auto browse tree yet (the media session itself works with Auto/Wear controls).
