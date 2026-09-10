@@ -70,7 +70,7 @@ class JellyfinClient(private val httpClient: OkHttpClient, private val json: Jso
             addQueryParameter("parentId", parentId)
             addQueryParameter("sortBy", "SortName")
             addQueryParameter("sortOrder", "Ascending")
-            addQueryParameter("fields", "Overview,ProductionYear,ChildCount,Chapters")
+            addQueryParameter("fields", "Overview,ProductionYear,ChildCount,Chapters,Path")
             addQueryParameter("enableImageTypes", "Primary")
             addQueryParameter("imageTypeLimit", "1")
         }
