@@ -50,6 +50,7 @@ data class BaseItemDto(
     @SerialName("ChildCount") val childCount: Int? = null,
     @SerialName("CollectionType") val collectionType: String? = null,
     @SerialName("Container") val container: String? = null,
+    @SerialName("Path") val path: String? = null,
     @SerialName("Overview") val overview: String? = null,
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("ProductionYear") val productionYear: Int? = null,
@@ -72,6 +73,9 @@ data class BaseItemDto(
     val runTimeMs: Long get() = runTimeTicks?.ticksToMs() ?: 0L
 
     val isAudioItem: Boolean get() = type == TYPE_AUDIO_BOOK || type == TYPE_AUDIO
+
+    /** The file's own name, which is where the play order lives when the tags do not carry it. */
+    val fileName: String get() = path?.substringAfterLast('/')?.substringAfterLast('\\') ?: ""
 
     companion object {
         const val TYPE_AUDIO_BOOK = "AudioBook"

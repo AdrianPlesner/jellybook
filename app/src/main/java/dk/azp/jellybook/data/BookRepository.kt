@@ -1,5 +1,6 @@
 package dk.azp.jellybook.data
 
+import android.util.Log
 import dk.azp.jellybook.data.jellyfin.BaseItemDto
 import dk.azp.jellybook.data.jellyfin.JellyfinClient
 import dk.azp.jellybook.data.local.ServerSession
@@ -76,18 +77,35 @@ class BookRepository(
         folders.map { folder -> async { resolveFolder(session, folder, depth) } }.awaitAll().flatten()
     }
 
-    private suspend fun audioParts(session: ServerSession, folderId: String): List<BaseItemDto> =
-        client.children(session.serverUrl, session.userId, folderId).filter { it.isAudioItem }.sortedWith(partOrder)
+    private suspend fun audioParts(session: ServerSession, folderId: String): List<BaseItemDto> {
+        val audio = client.children(session.serverUrl, session.userId, folderId).filter { it.isAudioItem }
+        val ordered = audio.sortedWith(partOrder)
+        if (ordered.size > 1 && !ordersItself(ordered)) {
+            Log.w(TAG, "Nothing orders the ${ordered.size} files in this folder: no track numbers, no distinct filenames")
+        }
+        return ordered
+    }
+
+    /** Whether the files carry anything the play order can be read from: disc or track tags, or distinct filenames. */
+    private fun ordersItself(items: List<BaseItemDto>): Boolean {
+        val tagged = items.all { it.indexNumber != null } && items.mapNotNull { it.indexNumber }.distinct().size == items.size
+        val named = items.map { it.fileName }.filter { it.isNotBlank() }.distinct().size == items.size
+        return tagged || named
+    }
 
     private companion object {
         const val COLLECTION_TYPE_BOOKS = "books"
         const val MAX_DEPTH = 3
 
-        /** Disc, then track number from the file tags, then the name the server sorted by. */
-        val partOrder = compareBy<BaseItemDto>(
-            { it.parentIndexNumber ?: 0 },
-            { it.indexNumber ?: Int.MAX_VALUE },
-            { it.displayTitle.lowercase() },
-        )
+        const val TAG = "BookRepository"
+
+        /**
+         * Disc and track tags first, since those state the intent. Then the filename, read the way a person reads numbered
+         * files, because that is the only thing left when a rip tags every file identically. The item name comes last and
+         * is usually a tie by then.
+         */
+        val partOrder = compareBy<BaseItemDto>({ it.parentIndexNumber ?: 0 }, { it.indexNumber ?: Int.MAX_VALUE })
+            .thenComparing({ it.fileName }, NaturalOrder)
+            .thenComparing({ it.displayTitle }, NaturalOrder)
     }
 }
