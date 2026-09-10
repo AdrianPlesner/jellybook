@@ -58,6 +58,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -162,6 +163,7 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                         item {
                             val reason = state.chapterNote ?: "This file has no chapter markers."
                             HintText("$reason Use the slider or bookmarks to navigate.")
+                            if (state.debugMode) state.chapterTrace?.let { TraceText(it) }
                         }
                     }
                     items(state.chapters, key = { it.index }) { chapter ->
@@ -425,6 +427,18 @@ private fun BookmarkRow(bookmark: Bookmark, chapterTitle: String?, onClick: () -
         IconButton(onClick = onRename) { Icon(Icons.Filled.Edit, contentDescription = "Rename bookmark") }
         IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete bookmark") }
     }
+}
+
+/** The parser's own account of what it found, for chasing a bug. Only shown when debug mode is on. */
+@Composable
+private fun TraceText(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelSmall,
+        fontFamily = FontFamily.Monospace,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 12.dp),
+    )
 }
 
 @Composable

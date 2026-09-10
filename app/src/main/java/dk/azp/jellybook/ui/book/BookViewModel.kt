@@ -33,6 +33,8 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         val isOfflineCopy: Boolean = false,
         val coverModel: Any? = null,
         val chapterNote: String? = null,
+        val chapterTrace: String? = null,
+        val debugMode: Boolean = false,
         val message: String? = null,
     )
 
@@ -49,6 +51,7 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         load()
         viewModelScope.launch { container.bookmarkRepository.bookmarks(bookId).collect { list -> stateFlow.update { it.copy(bookmarks = list) } } }
         viewModelScope.launch { container.downloadRepository.downloads.collect { map -> stateFlow.update { it.copy(download = map[bookId]) } } }
+        viewModelScope.launch { container.sessionStore.debugMode.collect { on -> stateFlow.update { it.copy(debugMode = on) } } }
         viewModelScope.launch {
             container.progressRepository.checkpointApplied.filter { it.bookId == bookId }.collect { applied ->
                 stateFlow.update { it.copy(resumePositionMs = applied.positionMs, awaitingConflict = false) }
@@ -179,7 +182,7 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
                 )
             }
             val chapters = chaptersFor(book)
-            stateFlow.update { it.copy(chapters = chapters.chapters, chapterNote = chapters.note) }
+            stateFlow.update { it.copy(chapters = chapters.chapters, chapterNote = chapters.note, chapterTrace = chapters.trace) }
             launch { container.bookmarkRepository.sync(bookId) }
         }
     }
