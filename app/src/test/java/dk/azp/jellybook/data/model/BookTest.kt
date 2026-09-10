@@ -141,6 +141,32 @@ class BookTest {
     }
 
     @Test
+    fun partsWhoseFilesAllCarryTheSameNameGetPositionalTitles() {
+        val items = (1..4).map { item("p$it", 120_000, name = "Mythos (Unabridged)") }
+
+        val parts = items.toParts()
+
+        assertEquals(listOf("Part 1", "Part 2", "Part 3", "Part 4"), parts.map { it.title })
+    }
+
+    @Test
+    fun partsKeepTheirOwnNamesWhenTheyDiffer() {
+        val items = listOf(item("a", 120_000, name = "01 - Arrival"), item("b", 120_000, name = "02 - The Harbour"))
+
+        assertEquals(listOf("01 - Arrival", "02 - The Harbour"), items.toParts().map { it.title })
+    }
+
+    @Test
+    fun chaptersOfIdenticallyNamedPartsAreNumbered() {
+        val items = (1..3).map { item("p$it", 120_000, name = "Mythos (Unabridged)") }
+        val parts = items.toParts()
+
+        val chapters = chaptersOf(parts, items, multiPart = true)
+
+        assertEquals(listOf("Part 1", "Part 2", "Part 3"), chapters.map { it.title })
+    }
+
+    @Test
     fun folderTitleWinsOverFileTitlesForAMultiPartBook() {
         val folder = BaseItemDto(id = "folder", name = "The Long Journey", type = BaseItemDto.TYPE_FOLDER, isFolder = true)
         val items = listOf(item("a", 150_000, name = "01 - Arrival"), item("b", 180_000, name = "02 - The Harbour"))

@@ -426,8 +426,10 @@ def inspect(server: Server, item: dict) -> None:
     sources = item.get("MediaSources") or []
     container = item.get("Container") or (sources[0].get("Container") if sources else None)
     size = sources[0].get("Size") if sources else None
+    duration = (item.get("RunTimeTicks") or 0) / 1e7
     print(f"  server reports {len(server_chapters)} chapter(s); container={container!r}; "
-          f"size={f'{size / 1e6:.1f} MB' if size else 'unknown'}")
+          f"size={f'{size / 1e6:.1f} MB' if size else 'unknown'}; length={duration / 60:.0f} min")
+    print(f"  grouping tags: album={item.get('Album')!r} track={item.get('IndexNumber')} disc={item.get('ParentIndexNumber')}")
     for chapter in server_chapters[:5]:
         print(f"    {chapter.get('StartPositionTicks', 0) // TICKS_PER_MS / 1000:8.1f}s  {chapter.get('Name')!r}")
     if len(server_chapters) > 5:
