@@ -17,6 +17,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.DownloadDone
@@ -90,9 +92,16 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
         val error: String? = null,
         val query: String = "",
         val session: ServerSession? = null,
+        val debugMode: Boolean = false,
     )
 
-    private class Meta(val isLoading: Boolean, val isOffline: Boolean, val error: String?, val session: ServerSession?)
+    private class Meta(
+        val isLoading: Boolean,
+        val isOffline: Boolean,
+        val error: String?,
+        val session: ServerSession?,
+        val debugMode: Boolean,
+    )
 
     private val books = MutableStateFlow<List<Book>>(emptyList())
     private val query = MutableStateFlow("")
@@ -100,8 +109,14 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
     private val offline = MutableStateFlow(false)
     private val error = MutableStateFlow<String?>(null)
 
-    private val meta = combine(loading, offline, error, container.sessionStore.session) { isLoading, isOffline, message, session ->
-        Meta(isLoading, isOffline, message, session)
+    private val meta = combine(
+        loading,
+        offline,
+        error,
+        container.sessionStore.session,
+        container.sessionStore.debugMode,
+    ) { isLoading, isOffline, message, session, debugMode ->
+        Meta(isLoading, isOffline, message, session, debugMode)
     }
 
     val state: StateFlow<State> = combine(books, query, container.progressRepository.localProgress, container.downloadRepository.downloads, meta) {
@@ -110,7 +125,7 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
             .filter { book -> matches(book, search) }
             .map { book -> toItem(book, progress[book.id], downloads[book.id]) }
             .sortedWith(itemOrder)
-        State(items, metadata.isLoading, metadata.isOffline, metadata.error, search, metadata.session)
+        State(items, metadata.isLoading, metadata.isOffline, metadata.error, search, metadata.session, metadata.debugMode)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), State())
 
     init {
@@ -142,6 +157,10 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
     fun signOut() {
         viewModelScope.launch { container.signOut() }
+    }
+
+    fun setDebugMode(enabled: Boolean) {
+        viewModelScope.launch { container.sessionStore.setDebugMode(enabled) }
     }
 
     private suspend fun showOfflineBooks(message: String?) {
@@ -208,6 +227,15 @@ fun LibraryScreen(container: AppContainer, onOpenBook: (String) -> Unit) {
                             onClick = {
                                 menuOpen = false
                                 viewModel.syncNow()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(if (state.debugMode) "Debug mode: on" else "Debug mode: off") },
+                            leadingIcon = { Icon(Icons.Filled.BugReport, contentDescription = null) },
+                            trailingIcon = { if (state.debugMode) Icon(Icons.Filled.Check, contentDescription = null) },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.setDebugMode(!state.debugMode)
                             },
                         )
                         DropdownMenuItem(

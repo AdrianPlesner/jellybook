@@ -6,8 +6,11 @@ import androidx.media3.datasource.DataSource
 import dk.azp.jellybook.data.local.OfflineCatalog
 import dk.azp.jellybook.data.model.Book
 
-/** Chapters, plus why there are none, so the book screen can say more than "no chapters". */
-data class ChapterResult(val chapters: List<Chapter>, val note: String? = null)
+/**
+ * Chapters, plus why there are none. [note] is meant to be read by anyone; [trace] is the parser's own account of what it
+ * found and is only shown when debug mode is on.
+ */
+data class ChapterResult(val chapters: List<Chapter>, val note: String? = null, val trace: String? = null)
 
 /**
  * Chapter markers for a book: Jellyfin's own chapter list when the server extracted one, otherwise the markers embedded in
@@ -46,11 +49,11 @@ class ChapterRepository(
                     ChapterResult(chapters)
                 }
                 parsed == null -> ChapterResult(emptyList(), "The file does not begin like an MP4 container.")
-                else -> ChapterResult(emptyList(), "No readable chapter markers. ${parsed.trace}")
+                else -> ChapterResult(emptyList(), "This file has no chapter markers the app can read.", parsed.trace)
             }.also { if (it.chapters.isEmpty()) Log.d(TAG, "No chapters in ${book.title}: ${it.note}") }
         } catch (e: Exception) {
             Log.w(TAG, "Could not read chapters for ${book.title}", e)
-            ChapterResult(emptyList(), "Could not read the file: ${e.javaClass.simpleName} ${e.message.orEmpty()}".trim())
+            ChapterResult(emptyList(), "Could not read the file.", "${e.javaClass.simpleName}: ${e.message.orEmpty()}".trim())
         }
     }
 

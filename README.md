@@ -126,6 +126,13 @@ openssl base64 -A -in jellybook.keystore | gh secret set RELEASE_KEYSTORE_BASE64
 Keep the keystore and its password backed up outside the repository. Losing them means future releases are signed with a
 different key and can no longer update an installed copy of the app.
 
+### Debug mode
+
+The overflow menu on the library screen has a **Debug mode** toggle, off by default. With it on, a book that reports no
+chapters also shows the parser's own trace: where `moov` was found, whether the child walk covered it, the chapter list
+sizes, the track count, the chapter-track references and the sample count. That line is what turns "no chapters" into a
+diagnosis. With it off, only the plain reason is shown.
+
 ### Diagnosing missing chapters
 
 `tools/inspect-chapters.py <server> <user>` reports, per book, how many chapters the server extracted and what the file

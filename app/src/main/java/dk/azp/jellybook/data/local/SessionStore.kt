@@ -2,6 +2,7 @@ package dk.azp.jellybook.data.local
 
 import android.content.Context
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -26,6 +27,9 @@ class SessionStore(context: Context) {
     val session: Flow<ServerSession?> = dataStore.data.map { it.toSession() }
 
     val playbackSpeed: Flow<Float> = dataStore.data.map { it[PLAYBACK_SPEED] ?: 1f }
+
+    /** Shows the parser's own trace where a book reports no chapters. Off unless someone is chasing a bug. */
+    val debugMode: Flow<Boolean> = dataStore.data.map { it[DEBUG_MODE] ?: false }
 
     suspend fun currentSession(): ServerSession? = dataStore.data.first().toSession()
 
@@ -62,6 +66,10 @@ class SessionStore(context: Context) {
 
     suspend fun currentPlaybackSpeed(): Float = dataStore.data.first()[PLAYBACK_SPEED] ?: 1f
 
+    suspend fun setDebugMode(enabled: Boolean) {
+        dataStore.edit { prefs -> prefs[DEBUG_MODE] = enabled }
+    }
+
     private fun Preferences.toSession(): ServerSession? {
         val serverUrl = this[SERVER_URL] ?: return null
         val token = this[ACCESS_TOKEN] ?: return null
@@ -83,5 +91,6 @@ class SessionStore(context: Context) {
         val SERVER_NAME = stringPreferencesKey("server_name")
         val DEVICE_ID = stringPreferencesKey("device_id")
         val PLAYBACK_SPEED = floatPreferencesKey("playback_speed")
+        val DEBUG_MODE = booleanPreferencesKey("debug_mode")
     }
 }
