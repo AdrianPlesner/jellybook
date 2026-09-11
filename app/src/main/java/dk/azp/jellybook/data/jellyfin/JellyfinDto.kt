@@ -1,5 +1,8 @@
 package dk.azp.jellybook.data.jellyfin
 
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -54,6 +57,7 @@ data class BaseItemDto(
     @SerialName("Overview") val overview: String? = null,
     @SerialName("RunTimeTicks") val runTimeTicks: Long? = null,
     @SerialName("ProductionYear") val productionYear: Int? = null,
+    @SerialName("PremiereDate") val premiereDate: String? = null,
     @SerialName("IndexNumber") val indexNumber: Int? = null,
     @SerialName("ParentIndexNumber") val parentIndexNumber: Int? = null,
     @SerialName("Album") val album: String? = null,
@@ -72,6 +76,20 @@ data class BaseItemDto(
 
     val runTimeMs: Long get() = runTimeTicks?.ticksToMs() ?: 0L
 
+    /**
+     * When the book was published, as a sortable instant. Jellyfin writes an unset date as year one, and many audiobooks
+     * carry only a year, so the year is the fallback.
+     */
+    val releaseDateEpochMs: Long?
+        get() {
+            val parsed = premiereDate
+                ?.let { raw -> runCatching { Instant.parse(raw).toEpochMilli() }.getOrNull() }
+                ?.takeIf { it > EARLIEST_REAL_RELEASE_MS }
+            return parsed ?: productionYear?.takeIf { it > 1000 }?.let { year ->
+                LocalDate.of(year, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+            }
+        }
+
     val isAudioItem: Boolean get() = type == TYPE_AUDIO_BOOK || type == TYPE_AUDIO
 
     /** The file's own name, which is where the play order lives when the tags do not carry it. */
@@ -81,6 +99,10 @@ data class BaseItemDto(
         const val TYPE_AUDIO_BOOK = "AudioBook"
         const val TYPE_AUDIO = "Audio"
         const val TYPE_FOLDER = "Folder"
+
+        /** Jellyfin writes "no date" as year one; anything before this is not a real release date. */
+        private val EARLIEST_REAL_RELEASE_MS =
+            LocalDate.of(1000, 1, 1).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
     }
 }
 

@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.BookmarkAdd
 import androidx.compose.material.icons.filled.Close
@@ -75,6 +76,7 @@ import dk.azp.jellybook.ui.formatClock
 import dk.azp.jellybook.ui.formatDurationShort
 import dk.azp.jellybook.ui.formatRelativeTime
 import dk.azp.jellybook.ui.formatSpeed
+import dk.azp.jellybook.ui.library.AddToListsDialog
 import dk.azp.jellybook.ui.library.Cover
 
 private val SPEED_STEPS = listOf(0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f)
@@ -95,6 +97,7 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
     var showAddBookmark by remember { mutableStateOf(false) }
     var bookmarkToRename by remember { mutableStateOf<Bookmark?>(null) }
     var confirmRemoveDownload by remember { mutableStateOf(false) }
+    var listsOpen by remember { mutableStateOf(false) }
     var listTab by rememberSaveable { mutableIntStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -118,6 +121,9 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
                 actions = {
                     if (state.book != null) {
+                        IconButton(onClick = { listsOpen = true }) {
+                            Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to list")
+                        }
                         DownloadAction(state.download, onDownload = viewModel::download, onRemove = { confirmRemoveDownload = true })
                     }
                 },
@@ -233,6 +239,16 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                 bookmarkToRename = null
             },
             onDismiss = { bookmarkToRename = null },
+        )
+    }
+    if (listsOpen) {
+        AddToListsDialog(
+            bookTitle = state.book?.title.orEmpty(),
+            lists = state.lists,
+            memberOf = state.memberOfLists,
+            onToggle = viewModel::setListMembership,
+            onCreate = viewModel::createListWithThisBook,
+            onDismiss = { listsOpen = false },
         )
     }
     if (confirmRemoveDownload) {

@@ -27,6 +27,7 @@ data class DownloadedBook(
     val imageTag: String? = null,
     val imageItemId: String? = null,
     val productionYear: Int? = null,
+    val releaseDateEpochMs: Long? = null,
     val partList: List<DownloadedPart> = emptyList(),
     val chapters: List<Chapter> = emptyList(),
     val coverPath: String? = null,

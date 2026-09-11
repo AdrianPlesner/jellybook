@@ -111,6 +111,7 @@ class DownloadRepository(
                 imageTag = book.imageTag,
                 imageItemId = book.imageItemId,
                 productionYear = book.productionYear,
+                releaseDateEpochMs = book.releaseDateEpochMs,
                 partList = book.parts.map { it.toDownloadedPart() },
                 chapters = chapters,
                 coverPath = coverPath,

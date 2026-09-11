@@ -7,6 +7,7 @@ import dk.azp.jellybook.AppContainer
 import dk.azp.jellybook.data.chapters.Chapter
 import dk.azp.jellybook.data.chapters.ChapterResult
 import dk.azp.jellybook.data.downloads.DownloadInfo
+import dk.azp.jellybook.data.local.BookList
 import dk.azp.jellybook.data.local.Bookmark
 import dk.azp.jellybook.data.model.Book
 import dk.azp.jellybook.data.progress.ProgressRepository
@@ -35,6 +36,8 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         val chapterNote: String? = null,
         val chapterTrace: String? = null,
         val debugMode: Boolean = false,
+        val lists: List<BookList> = emptyList(),
+        val memberOfLists: Set<String> = emptySet(),
         val message: String? = null,
     )
 
@@ -52,6 +55,13 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         viewModelScope.launch { container.bookmarkRepository.bookmarks(bookId).collect { list -> stateFlow.update { it.copy(bookmarks = list) } } }
         viewModelScope.launch { container.downloadRepository.downloads.collect { map -> stateFlow.update { it.copy(download = map[bookId]) } } }
         viewModelScope.launch { container.sessionStore.debugMode.collect { on -> stateFlow.update { it.copy(debugMode = on) } } }
+        viewModelScope.launch {
+            container.bookListRepository.lists.collect { lists ->
+                stateFlow.update { current ->
+                    current.copy(lists = lists, memberOfLists = lists.filter { bookId in it.bookIds }.map { it.id }.toSet())
+                }
+            }
+        }
         viewModelScope.launch {
             container.progressRepository.checkpointApplied.filter { it.bookId == bookId }.collect { applied ->
                 stateFlow.update { it.copy(resumePositionMs = applied.positionMs, awaitingConflict = false) }
@@ -144,6 +154,17 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
 
     fun removeDownload() {
         viewModelScope.launch { container.downloadRepository.removeDownload(bookId) }
+    }
+
+    fun setListMembership(listId: String, member: Boolean) {
+        viewModelScope.launch { container.bookListRepository.setMembership(listId, bookId, member) }
+    }
+
+    fun createListWithThisBook(name: String) {
+        viewModelScope.launch {
+            container.bookListRepository.create(name, firstBookId = bookId)
+            stateFlow.update { it.copy(message = "Added to $name") }
+        }
     }
 
     fun consumeMessage() = stateFlow.update { it.copy(message = null) }
