@@ -147,6 +147,30 @@ chapters also shows the parser's own trace: where `moov` was found, whether the 
 sizes, the track count, the chapter-track references and the sample count. That line is what turns "no chapters" into a
 diagnosis. With it off, only the plain reason is shown.
 
+### Adding chapters to a book that has none
+
+Some audiobooks ship without markers, so there is nothing for Jellyfin or any player to navigate by. The fix belongs in the
+file, and `tools/add-chapters.py` does it without re-encoding the audio:
+
+```bash
+tools/add-chapters.py book.m4b --list                      # what it has now
+tools/add-chapters.py book.m4b --chapters chapters.txt     # write markers from a list
+tools/add-chapters.py book.m4b --every 15m --replace       # or evenly spaced, in place
+```
+
+A chapters file is one marker per line, a timestamp then a title:
+
+```
+00:00:00 Opening
+01:12:30 The Harbour
+2:05:00  Night Watch
+```
+
+It writes a Nero `chpl` atom and a chapter track, which is what both Jellyfin and this app read, then verifies the result
+by reading the atoms back and refuses to touch the original if anything is missing. `--replace` keeps the original beside
+it as `.backup`. ffmpeg is used from `PATH` when present, otherwise it runs inside the `jellyfin/jellyfin` image, so Docker
+alone is enough. Rescan the library afterwards so Jellyfin picks the markers up.
+
 ### Diagnosing missing chapters
 
 `tools/inspect-chapters.py <server> <user>` reports, per book, how many chapters the server extracted and what the file
