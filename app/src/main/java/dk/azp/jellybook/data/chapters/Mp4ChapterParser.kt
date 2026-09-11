@@ -43,10 +43,15 @@ class Mp4ChapterParser(private val source: RandomAccessSource) {
         val neroMayBeTruncated = neroChapters.isEmpty() || neroChapters.size >= NERO_MAX_CHAPTERS
         val walked = topLevel.lastOrNull()?.payloadEnd ?: moov.payloadStart
         val trace = StringBuilder(
-            "moov@${moov.payloadStart} children=${topLevel.count()} " +
+            "moov@${moov.payloadStart} ${moov.payloadSize / 1024}KB " +
+                "children=[${topLevel.joinToString(",") { it.type }}] " +
                 "walked=${if (walked >= moov.payloadEnd) "all" else "$walked/${moov.payloadEnd}"} " +
                 "duration=${durationMs / 1000}s chpl=${neroChapters.size}",
         )
+        // What sits inside udta says where else markers could be hiding, such as an iTunes tag this app does not read.
+        topLevel.firstOrNull { it.type == "udta" }?.let { udta ->
+            trace.append(" udta=[${childRefs(udta).joinToString(",") { it.type }}]")
+        }
         val starts = if (neroMayBeTruncated) {
             readChapterTrack(topLevel, trace)?.takeIf { it.size > neroChapters.size } ?: neroChapters
         } else {
