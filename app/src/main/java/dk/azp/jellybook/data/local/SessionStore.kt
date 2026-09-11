@@ -31,6 +31,13 @@ class SessionStore(context: Context) {
     /** Shows the parser's own trace where a book reports no chapters. Off unless someone is chasing a bug. */
     val debugMode: Flow<Boolean> = dataStore.data.map { it[DEBUG_MODE] ?: false }
 
+    /** How the library is ordered and grouped, and which custom list it is filtered to. */
+    val librarySort: Flow<String?> = dataStore.data.map { it[LIBRARY_SORT] }
+
+    val libraryGrouping: Flow<String?> = dataStore.data.map { it[LIBRARY_GROUPING] }
+
+    val selectedListId: Flow<String?> = dataStore.data.map { it[SELECTED_LIST_ID] }
+
     suspend fun currentSession(): ServerSession? = dataStore.data.first().toSession()
 
     suspend fun deviceId(): String {
@@ -70,6 +77,18 @@ class SessionStore(context: Context) {
         dataStore.edit { prefs -> prefs[DEBUG_MODE] = enabled }
     }
 
+    suspend fun setLibrarySort(sort: String) {
+        dataStore.edit { prefs -> prefs[LIBRARY_SORT] = sort }
+    }
+
+    suspend fun setLibraryGrouping(grouping: String) {
+        dataStore.edit { prefs -> prefs[LIBRARY_GROUPING] = grouping }
+    }
+
+    suspend fun setSelectedListId(listId: String?) {
+        dataStore.edit { prefs -> if (listId == null) prefs.remove(SELECTED_LIST_ID) else prefs[SELECTED_LIST_ID] = listId }
+    }
+
     private fun Preferences.toSession(): ServerSession? {
         val serverUrl = this[SERVER_URL] ?: return null
         val token = this[ACCESS_TOKEN] ?: return null
@@ -92,5 +111,8 @@ class SessionStore(context: Context) {
         val DEVICE_ID = stringPreferencesKey("device_id")
         val PLAYBACK_SPEED = floatPreferencesKey("playback_speed")
         val DEBUG_MODE = booleanPreferencesKey("debug_mode")
+        val LIBRARY_SORT = stringPreferencesKey("library_sort")
+        val LIBRARY_GROUPING = stringPreferencesKey("library_grouping")
+        val SELECTED_LIST_ID = stringPreferencesKey("selected_list_id")
     }
 }

@@ -19,6 +19,8 @@ import dk.azp.jellybook.data.chapters.ChapterRepository
 import dk.azp.jellybook.data.downloads.DownloadRepository
 import dk.azp.jellybook.data.jellyfin.JellyfinAuthInterceptor
 import dk.azp.jellybook.data.jellyfin.JellyfinClient
+import dk.azp.jellybook.data.lists.BookListRepository
+import dk.azp.jellybook.data.local.BookListStore
 import dk.azp.jellybook.data.local.BookmarkStore
 import dk.azp.jellybook.data.local.OfflineCatalog
 import dk.azp.jellybook.data.local.ProgressStore
@@ -51,6 +53,7 @@ class AppContainer(context: Context) {
     private val progressStore = ProgressStore(context)
     private val offlineCatalog = OfflineCatalog(context)
     private val bookmarkStore = BookmarkStore(context)
+    private val bookListStore = BookListStore(context)
     val connectivity = Connectivity(context)
 
     val httpClient: OkHttpClient = OkHttpClient.Builder()
@@ -83,6 +86,7 @@ class AppContainer(context: Context) {
     val bookRepository = BookRepository(client, sessionStore)
     val progressRepository = ProgressRepository(client, bookRepository, sessionStore, progressStore, connectivity)
     val bookmarkRepository = BookmarkRepository(client, sessionStore, bookmarkStore, connectivity)
+    val bookListRepository = BookListRepository(client, sessionStore, bookListStore, connectivity)
     val downloadRepository = DownloadRepository(context, downloadManager, offlineCatalog, client, sessionStore, httpClient, appScope)
     val playback = PlaybackConnection(context)
 
@@ -98,6 +102,7 @@ class AppContainer(context: Context) {
         appScope.launch {
             progressRepository.flushPending()
             bookmarkRepository.flushPending()
+            bookListRepository.flushPending()
         }
     }
 

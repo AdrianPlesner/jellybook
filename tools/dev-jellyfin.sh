@@ -22,6 +22,7 @@ title=The Test Book
 artist=Test Author
 album_artist=Test Author
 album=The Test Book
+date=2019
 [CHAPTER]
 TIMEBASE=1/1000
 START=0
@@ -55,6 +56,7 @@ title=Short Story
 artist=Another Author
 album_artist=Another Author
 album=Short Story
+date=2024
 [CHAPTER]
 TIMEBASE=1/1000
 START=0
@@ -84,13 +86,16 @@ docker exec $NAME $FF -hide_banner -loglevel error -y \
 
 # Several complete m4b books sharing one folder, each with its own chapters and album: must stay separate books.
 i=1
-for spec in "The Quiet Coast:Coast Author" "Winter Lanterns:Lantern Author"; do
+for spec in "The Quiet Coast:Coast Author:2015" "Winter Lanterns:Coast Author:1998"; do
   TITLE=${spec%%:*}
-  WRITER=${spec##*:}
+  REST=${spec#*:}
+  WRITER=${REST%%:*}
+  YEAR=${REST##*:}
   {
     echo ";FFMETADATA1"
     echo "title=$TITLE"
     echo "album=$TITLE"
+    echo "date=$YEAR"
     echo "artist=$WRITER"
     echo "album_artist=$WRITER"
     for c in 1 2 3; do
@@ -113,6 +118,7 @@ done
   echo ";FFMETADATA1"
   echo "title=Track Only Tales"
   echo "album=Track Only Tales"
+  echo "date=2022"
   echo "artist=Track Author"
   echo "album_artist=Track Author"
   for c in 1 2 3 4; do
@@ -140,6 +146,7 @@ for spec in "Arrival:150" "The Harbour:180" "Night Watch:90" "Departure:210" "Ep
     -c:a libmp3lame -b:a 32k \
     -metadata "title=$NUM - $TITLE" \
     -metadata "album=The Long Journey" \
+    -metadata "date=2001" \
     -metadata "artist=Third Author" \
     -metadata "album_artist=Third Author" \
     -metadata "track=$i/5" \

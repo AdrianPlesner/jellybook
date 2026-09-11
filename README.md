@@ -27,6 +27,10 @@ Download the latest APK from the [releases page](https://github.com/AdrianPlesne
   meantime), the app shows both checkpoints and asks which one to keep.
 - **Named bookmarks** per book, synced through the user's Jellyfin display preferences so they also follow you across devices.
 - **Sleep timer**: stop after N minutes, or at the end of the current or any later chapter.
+- **Library views.** Sort by recently played, title, author, or release date in either direction, and optionally group by
+  author with a heading and count per author. The choice is remembered.
+- **Custom lists.** Put books into lists of your own and filter the library to one with a tap. Lists are stored on the
+  server, so they follow you to another device.
 - Playback speed 0.75x to 2x, remembered between sessions.
 
 ## How progress is stored (why no plugin is needed)
@@ -41,6 +45,16 @@ last five minutes. To keep the exact position anyway the app additionally writes
 
 Bookmarks live in `GET/POST /DisplayPreferences/jellybook?client=jellybook` under `CustomPrefs["bookmarks.<itemId>"]`, the
 same per-user key/value store the web client uses for its settings.
+
+### Custom lists
+
+Lists live in the same per-user display preferences as bookmarks, under `CustomPrefs["booklists"]`, holding the app's own
+book ids.
+
+Jellyfin's playlists would have been the obvious home, and they do accept audiobooks, but adding a folder to one expands it
+into the files inside. A multi-file book would then appear as a row per file rather than as one book, so a list of books
+could not be represented. Storing book ids keeps a book a book, at the cost of the lists not appearing in Jellyfin's own
+interface.
 
 ### Multi-file books
 
