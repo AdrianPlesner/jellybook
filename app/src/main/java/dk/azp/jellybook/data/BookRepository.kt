@@ -44,7 +44,7 @@ class BookRepository(
         val session = sessionStore.currentSession() ?: throw IOException("Not signed in")
         val item = client.item(session.serverUrl, session.userId, bookId)
         if (!item.isFolder) return item.toSingleFileBook()
-        val parts = audioParts(session, item.id)
+        val parts = audioParts(session, item.id, withMediaSources = true)
         return when {
             parts.isEmpty() -> throw IOException("No audio files in ${item.displayTitle}")
             BookGrouping.looksLikeOneBook(parts) -> multiPartBook(item, parts)
@@ -77,8 +77,8 @@ class BookRepository(
         folders.map { folder -> async { resolveFolder(session, folder, depth) } }.awaitAll().flatten()
     }
 
-    private suspend fun audioParts(session: ServerSession, folderId: String): List<BaseItemDto> {
-        val audio = client.children(session.serverUrl, session.userId, folderId).filter { it.isAudioItem }
+    private suspend fun audioParts(session: ServerSession, folderId: String, withMediaSources: Boolean = false): List<BaseItemDto> {
+        val audio = client.children(session.serverUrl, session.userId, folderId, withMediaSources).filter { it.isAudioItem }
         val ordered = audio.sortedWith(partOrder)
         if (ordered.size > 1 && !ordersItself(ordered)) {
             Log.w(TAG, "Nothing orders the ${ordered.size} files in this folder: no track numbers, no distinct filenames")

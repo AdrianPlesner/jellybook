@@ -31,6 +31,8 @@ data class BookPart(
     val container: String?,
     val imageTag: String?,
     val remoteProgress: RemoteProgress?,
+    /** The file's size, when the server reported it; only a book loaded on its own carries sizes. */
+    val sizeBytes: Long? = null,
 ) {
     val endOffsetMs: Long get() = startOffsetMs + durationMs
 }
@@ -54,6 +56,9 @@ data class Book(
     val isMultiPart: Boolean get() = parts.size > 1
 
     val container: String? get() = parts.firstOrNull()?.container
+
+    /** What a download costs, or null unless every part's size is known. */
+    val sizeBytes: Long? get() = parts.takeIf { list -> list.isNotEmpty() && list.all { it.sizeBytes != null } }?.sumOf { it.sizeBytes ?: 0L }
 
     /** The part covering a book-relative position, clamped to the ends. */
     fun partAt(positionMs: Long): BookPart =
@@ -132,6 +137,7 @@ fun List<BaseItemDto>.toParts(): List<BookPart> {
             container = item.container ?: item.mediaSources.firstOrNull()?.container,
             imageTag = item.primaryImageTag,
             remoteProgress = item.userData?.toRemoteProgress(),
+            sizeBytes = item.mediaSources.firstOrNull()?.size,
         ).also { offset += duration }
     }.withUsefulTitles()
 }

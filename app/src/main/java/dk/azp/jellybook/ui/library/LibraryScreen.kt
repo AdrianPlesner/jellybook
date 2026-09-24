@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -619,6 +620,8 @@ private fun DownloadBadge(download: DownloadInfo?) {
             Icon(Icons.Filled.DownloadDone, contentDescription = "Downloaded", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
         DownloadStatus.DOWNLOADING, DownloadStatus.QUEUED ->
             CircularProgressIndicator(progress = { download.percent / 100f }, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+        DownloadStatus.WAITING_FOR_WIFI ->
+            Icon(Icons.Filled.WifiOff, contentDescription = "Waiting for Wi-Fi", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
         DownloadStatus.FAILED -> Text("Download failed", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
         else -> Unit
     }

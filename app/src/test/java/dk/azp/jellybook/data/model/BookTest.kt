@@ -2,6 +2,7 @@ package dk.azp.jellybook.data.model
 
 import dk.azp.jellybook.data.jellyfin.BaseItemDto
 import dk.azp.jellybook.data.jellyfin.ChapterInfo
+import dk.azp.jellybook.data.jellyfin.MediaSourceInfo
 import dk.azp.jellybook.data.jellyfin.UserItemDataDto
 import dk.azp.jellybook.data.jellyfin.msToTicks
 import org.junit.Assert.assertEquals
@@ -179,6 +180,22 @@ class BookTest {
         assertEquals("a", book.imageItemId)
     }
 
+    @Test
+    fun sizeIsTheSumOfThePartSizes() {
+        val book = multiPartBook(folder(), listOf(item("a", 1_000, sizeBytes = 300), item("b", 1_000, sizeBytes = 200)))
+
+        assertEquals(500L, book.sizeBytes)
+    }
+
+    @Test
+    fun sizeIsUnknownWhenAnyPartSizeIs() {
+        val book = multiPartBook(folder(), listOf(item("a", 1_000, sizeBytes = 300), item("b", 1_000)))
+
+        assertNull(book.sizeBytes)
+    }
+
+    private fun folder() = BaseItemDto(id = "folder", name = "Book", type = BaseItemDto.TYPE_FOLDER, isFolder = true)
+
     private fun multiPart(vararg durations: Long): Book {
         val items = durations.mapIndexed { index, duration -> item("p$index", duration, name = "Part ${index + 1}") }
         return multiPartBook(BaseItemDto(id = "folder", name = "Book", type = BaseItemDto.TYPE_FOLDER, isFolder = true), items)
@@ -197,6 +214,7 @@ class BookTest {
         name: String = id,
         chapters: List<Pair<Long, String>> = emptyList(),
         userData: UserItemDataDto? = null,
+        sizeBytes: Long? = null,
     ) = BaseItemDto(
         id = id,
         name = name,
@@ -204,5 +222,6 @@ class BookTest {
         runTimeTicks = durationMs.msToTicks(),
         chapters = chapters.map { (start, title) -> ChapterInfo(start.msToTicks(), title) },
         userData = userData,
+        mediaSources = sizeBytes?.let { listOf(MediaSourceInfo(id = id, size = it)) }.orEmpty(),
     )
 }

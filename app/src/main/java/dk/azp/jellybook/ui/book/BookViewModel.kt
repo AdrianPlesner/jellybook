@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Shown before a download that would use mobile data. */
+data class MeteredDownloadWarning(val sizeBytes: Long?, val durationMs: Long, val onMobileData: Boolean)
+
 class BookViewModel(private val container: AppContainer, private val bookId: String) : ViewModel() {
 
     data class State(
@@ -39,6 +42,7 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
         val lists: List<BookList> = emptyList(),
         val memberOfLists: Set<String> = emptySet(),
         val message: String? = null,
+        val meteredWarning: MeteredDownloadWarning? = null,
     )
 
     private val stateFlow = MutableStateFlow(State())
@@ -143,12 +147,33 @@ class BookViewModel(private val container: AppContainer, private val bookId: Str
 
     fun jumpToBookmark(bookmark: Bookmark) = seekTo(bookmark.positionMs)
 
-    fun download() {
+    /** Starts the download on Wi-Fi; on mobile data the user is asked first. */
+    fun requestDownload() {
         val book = stateFlow.value.book ?: return
+        val downloads = container.downloadRepository
+        if (downloads.wouldUseMeteredNetwork()) {
+            val warning = MeteredDownloadWarning(book.sizeBytes, book.durationMs, downloads.isOnMobileData())
+            stateFlow.update { it.copy(meteredWarning = warning) }
+        } else {
+            startDownload(allowMetered = false)
+        }
+    }
+
+    fun downloadOverMeteredNetwork() = startDownload(allowMetered = true)
+
+    fun downloadWhenOnWifi() = startDownload(allowMetered = false)
+
+    fun dismissMeteredWarning() = stateFlow.update { it.copy(meteredWarning = null) }
+
+    private fun startDownload(allowMetered: Boolean) {
+        val book = stateFlow.value.book ?: return
+        val waitsForWifi = !allowMetered && container.downloadRepository.wouldUseMeteredNetwork()
+        stateFlow.update { it.copy(meteredWarning = null) }
         viewModelScope.launch {
-            container.downloadRepository.startDownload(book, stateFlow.value.chapters)
+            container.downloadRepository.startDownload(book, stateFlow.value.chapters, allowMetered)
             val parts = if (book.isMultiPart) " (${book.parts.size} files)" else ""
-            stateFlow.update { it.copy(message = "Download started$parts") }
+            val message = if (waitsForWifi) "Download$parts will start on Wi-Fi" else "Download started$parts"
+            stateFlow.update { it.copy(message = message) }
         }
     }
 

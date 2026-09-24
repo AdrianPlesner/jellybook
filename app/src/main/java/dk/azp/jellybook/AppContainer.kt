@@ -10,6 +10,7 @@ import androidx.media3.datasource.cache.NoOpCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.offline.DownloadManager
+import androidx.media3.exoplayer.scheduler.Requirements
 import coil3.ImageLoader
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import dk.azp.jellybook.data.BookRepository
@@ -79,6 +80,8 @@ class AppContainer(context: Context) {
 
     val downloadManager = DownloadManager(context, databaseProvider, downloadCache, upstreamDataSourceFactory, Executors.newFixedThreadPool(2)).apply {
         maxParallelDownloads = 2
+        // Wi-Fi only until the download policy has looked at what is queued; it relaxes this for books allowed on mobile data.
+        requirements = Requirements(Requirements.NETWORK_UNMETERED)
     }
 
     val mediaItemFactory = MediaItemFactory(client, sessionStore)
@@ -87,7 +90,7 @@ class AppContainer(context: Context) {
     val progressRepository = ProgressRepository(client, bookRepository, sessionStore, progressStore, connectivity)
     val bookmarkRepository = BookmarkRepository(client, sessionStore, bookmarkStore, connectivity)
     val bookListRepository = BookListRepository(client, sessionStore, bookListStore, connectivity)
-    val downloadRepository = DownloadRepository(context, downloadManager, offlineCatalog, client, sessionStore, httpClient, appScope)
+    val downloadRepository = DownloadRepository(context, downloadManager, offlineCatalog, client, sessionStore, httpClient, connectivity, appScope)
     val playback = PlaybackConnection(context)
 
     val imageLoader: ImageLoader = ImageLoader.Builder(context)

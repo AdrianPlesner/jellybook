@@ -23,6 +23,8 @@ Download the latest APK from the [releases page](https://github.com/AdrianPlesne
   is required, see below.
 - **Offline listening.** Download a book to the device (Media3 download cache, resumable, with a progress notification) and
   play it without a connection. Progress recorded offline is queued and published to the server when the network is back.
+  Downloads are Wi-Fi only by default: on mobile data the app shows the book's size and asks whether to use mobile data or
+  wait for Wi-Fi, and a download started on Wi-Fi pauses if the phone falls back to mobile data and resumes on Wi-Fi.
 - **Conflict handling.** If the server position moved while this device had unsynced progress (you listened elsewhere in the
   meantime), the app shows both checkpoints and asks which one to keep.
 - **Named bookmarks** per book, synced through the user's Jellyfin display preferences so they also follow you across devices.
