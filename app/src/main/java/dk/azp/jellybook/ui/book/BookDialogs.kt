@@ -34,7 +34,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import dk.azp.jellybook.data.chapters.Chapter
 import dk.azp.jellybook.playback.SleepTimerState
+import dk.azp.jellybook.ui.formatBytes
 import dk.azp.jellybook.ui.formatClock
+import dk.azp.jellybook.ui.formatDurationShort
 import dk.azp.jellybook.ui.formatRelativeTime
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -157,6 +159,25 @@ fun RemoveDownloadDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
         text = { Text("The offline copy is deleted from this device. Your progress and bookmarks are kept.") },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Remove") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+fun MeteredDownloadDialog(warning: MeteredDownloadWarning, onUseMetered: () -> Unit, onWaitForWifi: () -> Unit, onDismiss: () -> Unit) {
+    val network = if (warning.onMobileData) "You are on mobile data." else "This network is metered, so the data may be charged."
+    val size = warning.sizeBytes?.let { "This book is ${formatBytes(it)} (${formatDurationShort(warning.durationMs)})." }
+        ?: "The size of this book is not known; it is ${formatDurationShort(warning.durationMs)} long."
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (warning.onMobileData) "Download over mobile data?" else "Download over a metered network?") },
+        text = { Text("$network $size\n\nWaiting for Wi-Fi queues it now and starts it by itself once you are connected.") },
+        confirmButton = { TextButton(onClick = onWaitForWifi) { Text("Wait for Wi-Fi") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+                TextButton(onClick = onUseMetered) { Text(if (warning.onMobileData) "Use mobile data" else "Download now") }
+            }
+        },
     )
 }
 

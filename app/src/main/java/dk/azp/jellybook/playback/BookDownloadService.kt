@@ -7,6 +7,8 @@ import androidx.core.app.NotificationCompat
 import androidx.media3.exoplayer.offline.Download
 import androidx.media3.exoplayer.offline.DownloadManager
 import androidx.media3.exoplayer.offline.DownloadService
+import androidx.media3.exoplayer.scheduler.PlatformScheduler
+import androidx.media3.exoplayer.scheduler.Requirements
 import androidx.media3.exoplayer.scheduler.Scheduler
 import dk.azp.jellybook.JellybookApp
 import dk.azp.jellybook.MainActivity
@@ -22,13 +24,19 @@ class BookDownloadService : DownloadService(
 
     override fun getDownloadManager(): DownloadManager = (application as JellybookApp).container.downloadManager
 
-    override fun getScheduler(): Scheduler? = null
+    /** Restarts the service when Wi-Fi returns for a paused download, even if the process was killed in between. */
+    override fun getScheduler(): Scheduler = PlatformScheduler(this, JOB_ID)
 
     override fun getForegroundNotification(downloads: MutableList<Download>, notMetRequirements: Int): Notification {
         val active = downloads.filter { it.state == Download.STATE_DOWNLOADING || it.state == Download.STATE_QUEUED }
         val known = active.map { it.percentDownloaded }.filter { it >= 0f }
         val percent = if (known.isEmpty()) 0 else (known.sum() / known.size).toInt()
-        val title = if (active.size == 1) "Downloading audiobook" else "Downloading ${active.size} audiobooks"
+        val waitingForWifi = notMetRequirements and Requirements.NETWORK_UNMETERED != 0
+        val title = when {
+            waitingForWifi -> "Waiting for Wi-Fi"
+            active.size == 1 -> "Downloading audiobook"
+            else -> "Downloading ${active.size} audiobooks"
+        }
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -50,5 +58,6 @@ class BookDownloadService : DownloadService(
     private companion object {
         const val NOTIFICATION_ID = 2001
         const val CHANNEL_ID = "downloads"
+        const val JOB_ID = 2002
     }
 }

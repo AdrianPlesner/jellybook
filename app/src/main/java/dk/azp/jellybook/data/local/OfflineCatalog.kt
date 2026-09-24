@@ -32,6 +32,8 @@ data class DownloadedBook(
     val chapters: List<Chapter> = emptyList(),
     val coverPath: String? = null,
     val downloadedAtEpochMs: Long,
+    /** The user chose to download over mobile data; otherwise the download waits for Wi-Fi. */
+    val allowMetered: Boolean = false,
 )
 
 @Serializable

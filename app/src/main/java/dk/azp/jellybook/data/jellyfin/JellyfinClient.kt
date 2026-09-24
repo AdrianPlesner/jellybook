@@ -62,15 +62,16 @@ class JellyfinClient(private val httpClient: OkHttpClient, private val json: Jso
 
     /**
      * Direct children of a folder. Walking the library one level at a time is what tells a folder that *is* a book (its
-     * children are audio files) apart from a folder that merely *contains* books.
+     * children are audio files) apart from a folder that merely *contains* books. Media sources carry the file sizes but
+     * are heavy, so the library walk leaves them out.
      */
-    suspend fun children(serverUrl: String, userId: String, parentId: String): List<BaseItemDto> {
+    suspend fun children(serverUrl: String, userId: String, parentId: String, withMediaSources: Boolean = false): List<BaseItemDto> {
         val url = url(serverUrl, "Items") {
             addQueryParameter("userId", userId)
             addQueryParameter("parentId", parentId)
             addQueryParameter("sortBy", "SortName")
             addQueryParameter("sortOrder", "Ascending")
-            addQueryParameter("fields", "Overview,ProductionYear,ChildCount,Chapters,Path")
+            addQueryParameter("fields", "Overview,ProductionYear,ChildCount,Chapters,Path" + if (withMediaSources) ",MediaSources" else "")
             addQueryParameter("enableImageTypes", "Primary")
             addQueryParameter("imageTypeLimit", "1")
         }

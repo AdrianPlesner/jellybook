@@ -45,3 +45,13 @@ fun formatRelativeTime(epochMs: Long, nowMs: Long = System.currentTimeMillis()):
 }
 
 fun formatSpeed(speed: Float): String = if (speed == speed.toInt().toFloat()) "${speed.toInt()}x" else String.format(Locale.ROOT, "%.2fx", speed).replace("0x", "x")
+
+/** "740 MB", "1.2 GB" or "850 KB", in decimal units as phone data plans count them. */
+fun formatBytes(bytes: Long): String {
+    val value = bytes.coerceAtLeast(0).toDouble()
+    return when {
+        value >= 1e9 -> String.format(Locale.ROOT, "%.1f GB", value / 1e9)
+        value >= 1e6 -> String.format(Locale.ROOT, "%.0f MB", value / 1e6)
+        else -> String.format(Locale.ROOT, "%.0f KB", value / 1e3)
+    }
+}

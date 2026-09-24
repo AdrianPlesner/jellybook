@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -124,7 +125,7 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                         IconButton(onClick = { listsOpen = true }) {
                             Icon(Icons.AutoMirrored.Filled.PlaylistAdd, contentDescription = "Add to list")
                         }
-                        DownloadAction(state.download, onDownload = viewModel::download, onRemove = { confirmRemoveDownload = true })
+                        DownloadAction(state.download, onDownload = viewModel::requestDownload, onRemove = { confirmRemoveDownload = true })
                     }
                 },
             )
@@ -251,6 +252,14 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
             onDismiss = { listsOpen = false },
         )
     }
+    state.meteredWarning?.let { warning ->
+        MeteredDownloadDialog(
+            warning = warning,
+            onUseMetered = viewModel::downloadOverMeteredNetwork,
+            onWaitForWifi = viewModel::downloadWhenOnWifi,
+            onDismiss = viewModel::dismissMeteredWarning,
+        )
+    }
     if (confirmRemoveDownload) {
         RemoveDownloadDialog(
             onConfirm = {
@@ -278,6 +287,9 @@ private fun DownloadAction(download: DownloadInfo?, onDownload: () -> Unit, onRe
                 CircularProgressIndicator(progress = { download.percent / 100f }, modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
                 Icon(Icons.Filled.Close, contentDescription = "Cancel download", modifier = Modifier.size(12.dp))
             }
+        }
+        DownloadStatus.WAITING_FOR_WIFI -> IconButton(onClick = onRemove) {
+            Icon(Icons.Filled.WifiOff, contentDescription = "Waiting for Wi-Fi, tap to cancel", tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         DownloadStatus.FAILED -> IconButton(onClick = onDownload) {
             Icon(Icons.Filled.ErrorOutline, contentDescription = "Download failed, tap to retry", tint = MaterialTheme.colorScheme.error)
