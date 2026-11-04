@@ -85,7 +85,7 @@ private const val SKIP_MS = 30_000L
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
+fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit, bottomBar: @Composable () -> Unit = {}) {
     val viewModel: BookViewModel = viewModel(key = "book:$bookId") { BookViewModel(container, bookId) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val player by viewModel.player.collectAsStateWithLifecycle()
@@ -130,6 +130,7 @@ fun BookScreen(container: AppContainer, bookId: String, onBack: () -> Unit) {
                 },
             )
         },
+        bottomBar = bottomBar,
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         val book = state.book

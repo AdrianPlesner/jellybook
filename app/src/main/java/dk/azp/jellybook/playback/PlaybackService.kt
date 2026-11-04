@@ -182,14 +182,9 @@ class PlaybackService : MediaSessionService() {
             isForPlayback: Boolean,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> = serviceScope.future {
             val recent = container.progressRepository.mostRecentlyPlayed() ?: throw UnsupportedOperationException("Nothing to resume")
-            val book = container.downloadRepository.downloadedBook(recent.itemId)
-                ?: runCatching { container.bookRepository.book(recent.itemId) }.getOrNull()
-                ?: throw UnsupportedOperationException("Cannot reach the server")
-            val coverPath = container.downloadRepository.coverFile(book.id)?.absolutePath
-            val items = container.mediaItemFactory.create(book, coverPath)
-            if (items.isEmpty()) throw UnsupportedOperationException("Not signed in")
-            val split = book.toPartPosition(recent.positionMs)
-            MediaSession.MediaItemsWithStartPosition(items, split.partIndex, split.offsetMs)
+            val resume = container.resumeLoader.load(recent.itemId, recent.positionMs)
+                ?: throw UnsupportedOperationException("Cannot load ${recent.title}")
+            MediaSession.MediaItemsWithStartPosition(resume.items, resume.partIndex, resume.offsetInPartMs)
         }
     }
 
