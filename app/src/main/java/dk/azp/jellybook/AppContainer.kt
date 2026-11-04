@@ -29,6 +29,7 @@ import dk.azp.jellybook.data.local.SessionStore
 import dk.azp.jellybook.data.progress.ProgressRepository
 import dk.azp.jellybook.playback.MediaItemFactory
 import dk.azp.jellybook.playback.PlaybackConnection
+import dk.azp.jellybook.playback.ResumeLoader
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -92,6 +93,7 @@ class AppContainer(context: Context) {
     val bookListRepository = BookListRepository(client, sessionStore, bookListStore, connectivity)
     val downloadRepository = DownloadRepository(context, downloadManager, offlineCatalog, client, sessionStore, httpClient, connectivity, appScope)
     val playback = PlaybackConnection(context)
+    val resumeLoader = ResumeLoader(downloadRepository, bookRepository, mediaItemFactory)
 
     val imageLoader: ImageLoader = ImageLoader.Builder(context)
         .components { add(OkHttpNetworkFetcherFactory(httpClient)) }

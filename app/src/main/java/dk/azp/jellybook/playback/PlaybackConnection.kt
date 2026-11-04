@@ -2,6 +2,7 @@ package dk.azp.jellybook.playback
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
 import android.os.Bundle
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -30,6 +31,9 @@ import kotlinx.coroutines.launch
  */
 data class PlayerUiState(
     val bookId: String? = null,
+    val bookTitle: String? = null,
+    val author: String? = null,
+    val artworkUri: Uri? = null,
     val partIndex: Int = 0,
     val partTitle: String? = null,
     val isPlaying: Boolean = false,
@@ -96,12 +100,13 @@ class PlaybackConnection(private val context: Context) {
         controller = null
     }
 
-    suspend fun play(items: List<MediaItem>, startPartIndex: Int, startOffsetInPartMs: Long) {
+    /** Loads a book into the player; with [startPlaying] false it waits, paused, at the start position. */
+    suspend fun play(items: List<MediaItem>, startPartIndex: Int, startOffsetInPartMs: Long, startPlaying: Boolean = true) {
         if (items.isEmpty()) return
         val active = awaitController()
         active.setMediaItems(items, startPartIndex.coerceIn(items.indices), startOffsetInPartMs.coerceAtLeast(0L))
         active.prepare()
-        active.play()
+        if (startPlaying) active.play()
     }
 
     fun togglePlayPause() {
@@ -119,6 +124,19 @@ class PlaybackConnection(private val context: Context) {
         val active = controller ?: return
         val index = partIndex.coerceIn(0, (active.mediaItemCount - 1).coerceAtLeast(0))
         active.seekTo(index, offsetInPartMs.coerceAtLeast(0L))
+    }
+
+    /** Moves along the book timeline, crossing into the neighbouring part of a multi-file book when needed. */
+    fun seekBy(deltaMs: Long) {
+        val active = controller ?: return
+        val current = active.currentMediaItem?.let { PlaybackTarget.fromMediaItem(it) } ?: return
+        val bookEndMs = if (current.bookDurationMs > 0) current.bookDurationMs else Long.MAX_VALUE
+        val targetMs = (current.bookPositionMs(active.currentPosition) + deltaMs).coerceIn(0L, bookEndMs)
+        val partList = (0 until active.mediaItemCount).mapNotNull { index ->
+            PlaybackTarget.fromMediaItem(active.getMediaItemAt(index))?.let { index to it }
+        }
+        val (index, part) = partList.lastOrNull { (_, part) -> part.partStartOffsetMs <= targetMs } ?: return
+        active.seekTo(index, targetMs - part.partStartOffsetMs)
     }
 
     /** Book-relative position of the player right now, or null when it is not playing this book. */
@@ -161,6 +179,9 @@ class PlaybackConnection(private val context: Context) {
         stateFlow.update { current ->
             current.copy(
                 bookId = target?.bookId,
+                bookTitle = target?.bookTitle,
+                author = target?.author,
+                artworkUri = player.currentMediaItem?.mediaMetadata?.artworkUri,
                 partIndex = target?.partIndex ?: 0,
                 partTitle = target?.partTitle,
                 isPlaying = player.isPlaying,

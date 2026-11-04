@@ -276,7 +276,7 @@ class LibraryViewModel(private val container: AppContainer) : ViewModel() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LibraryScreen(container: AppContainer, onOpenBook: (String) -> Unit) {
+fun LibraryScreen(container: AppContainer, onOpenBook: (String) -> Unit, bottomBar: @Composable () -> Unit = {}) {
     val viewModel: LibraryViewModel = viewModel { LibraryViewModel(container) }
     val state by viewModel.state.collectAsStateWithLifecycle()
     var menuOpen by remember { mutableStateOf(false) }
@@ -371,6 +371,7 @@ fun LibraryScreen(container: AppContainer, onOpenBook: (String) -> Unit) {
                 },
             )
         },
+        bottomBar = bottomBar,
     ) { padding ->
         Column(modifier = Modifier.fillMaxSize().padding(padding)) {
             if (state.isOffline) {

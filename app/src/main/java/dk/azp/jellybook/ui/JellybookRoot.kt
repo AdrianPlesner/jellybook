@@ -22,6 +22,7 @@ import dk.azp.jellybook.data.local.ServerSession
 import dk.azp.jellybook.ui.book.BookScreen
 import dk.azp.jellybook.ui.library.LibraryScreen
 import dk.azp.jellybook.ui.login.LoginScreen
+import dk.azp.jellybook.ui.player.MiniPlayerBar
 import dk.azp.jellybook.ui.theme.JellybookTheme
 import kotlinx.coroutines.launch
 
@@ -59,10 +60,11 @@ private fun SignedInContent(container: AppContainer) {
     BackHandler(enabled = openBookId != null) { openBookId = null }
 
     val bookId = openBookId
+    val miniPlayer: @Composable () -> Unit = { MiniPlayerBar(container, openBookId = bookId, onOpenBook = { openBookId = it }) }
     if (bookId == null) {
-        LibraryScreen(container, onOpenBook = { openBookId = it })
+        LibraryScreen(container, onOpenBook = { openBookId = it }, bottomBar = miniPlayer)
     } else {
-        BookScreen(container, bookId, onBack = { openBookId = null })
+        BookScreen(container, bookId, onBack = { openBookId = null }, bottomBar = miniPlayer)
     }
 
     conflicts.firstOrNull { it.itemId !in deferredConflictIds }?.let { conflict ->
